@@ -1,0 +1,32 @@
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common'
+import { InjectQueue } from '@nestjs/bull'
+import type { Queue } from 'bull'
+
+const FLUSH_CRON = '*/5 * * * *'
+const SUMMARY_CRON = '0 2 * * *'
+
+@Injectable()
+export class QueueService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(QueueService.name)
+
+  constructor(
+    @InjectQueue('token-flush') private readonly tokenFlushQueue: Queue,
+    @InjectQueue('feedback-summary') private readonly feedbackSummaryQueue: Queue,
+  ) {}
+
+  async onApplicationBootstrap() {
+    const tokenRepeatables = await this.tokenFlushQueue.getRepeatableJobs()
+    for (const job of tokenRepeatables) {
+      await this.tokenFlushQueue.removeRepeatableByKey(job.key)
+    }
+    await this.tokenFlushQueue.add('flush', {}, { repeat: { cron: FLUSH_CRON } })
+    this.logger.log(`Token flush job scheduled: ${FLUSH_CRON}`)
+
+    const summaryRepeatables = await this.feedbackSummaryQueue.getRepeatableJobs()
+    for (const job of summaryRepeatables) {
+      await this.feedbackSummaryQueue.removeRepeatableByKey(job.key)
+    }
+    await this.feedbackSummaryQueue.add('summarize', {}, { repeat: { cron: SUMMARY_CRON } })
+    this.logger.log(`Feedback summary job scheduled: ${SUMMARY_CRON}`)
+  }
+}

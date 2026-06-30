@@ -1,0 +1,201 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  phone     String   @unique
+  name      String?
+  role      Role     @default(USER)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversations Conversation[]
+  subscription  Subscription?
+  payments      Payment[]
+  refreshTokens RefreshToken[]
+  dailyUsages   DailyUsage[]
+  feedbacks     Feedback[]
+
+  @@map("users")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model Plan {
+  id                 String  @id @default(uuid())
+  name               String  @unique
+  priceMonthly       Int
+  dailyFreeTokens    Int
+  monthlyTotalTokens Int
+  allowedModels      Json
+  features           Json    @default("{}")
+  isActive           Boolean @default(true)
+  sortOrder          Int     @default(0)
+
+  subscriptions Subscription[]
+  payments      Payment[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                String             @id @default(uuid())
+  userId            String             @unique
+  planId            String
+  status            SubscriptionStatus @default(ACTIVE)
+  periodStart       DateTime
+  periodEnd         DateTime
+  cancelAtPeriodEnd Boolean            @default(false)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  TRIAL
+}
+
+model Conversation {
+  id            String   @id @default(uuid())
+  userId        String
+  title         String?
+  model         String
+  systemPrompt  String?
+  totalTokens   Int      @default(0)
+  isArchived    Boolean  @default(false)
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([userId, lastMessageAt(sort: Desc)])
+  @@map("conversations")
+}
+
+model Message {
+  id             String      @id @default(uuid())
+  conversationId String
+  role           MessageRole
+  content        String
+  tokensInput    Int         @default(0)
+  tokensOutput   Int         @default(0)
+  model          String?
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model Payment {
+  id        String        @id @default(uuid())
+  userId    String
+  planId    String
+  amount    Int
+  status    PaymentStatus @default(PENDING)
+  authority String?       @unique
+  refId     String?
+  metadata  Json?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@index([userId])
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model DailyUsage {
+  id             String   @id @default(uuid())
+  userId         String
+  date           DateTime @db.Date
+  freeTokensUsed Int      @default(0)
+  paidTokensUsed Int      @default(0)
+  requestsCount  Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+  @@map("daily_usage")
+}
+
+enum FeedbackCategory {
+  FEATURE_REQUEST
+  BUG
+  UX
+  PRICING
+  GENERAL
+}
+
+model Feedback {
+  id        String           @id @default(uuid())
+  userId    String?
+  category  FeedbackCategory @default(GENERAL)
+  content   String
+  isChecked Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([isChecked, createdAt])
+  @@map("feedbacks")
+}
+
+model FeedbackSummary {
+  id          String   @id @default(uuid())
+  summary     String
+  topItems    Json
+  totalCount  Int      @default(0)
+  checkedUpTo DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@map("feedback_summaries")
+}

@@ -1,0 +1,42 @@
+import { IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator'
+import { fa } from '../../../i18n/fa'
+
+export class UpdatePlanDto {
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  @MaxLength(100, { message: fa.validation.stringTooLong })
+  name?: string
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(0, { message: fa.validation.numberPositive })
+  priceMonthly?: number
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(0, { message: fa.validation.numberPositive })
+  dailyFreeTokens?: number
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(0, { message: fa.validation.numberPositive })
+  monthlyTotalTokens?: number
+
+  @IsOptional()
+  @IsArray({ message: fa.validation.mustBeArray })
+  @IsString({ each: true, message: fa.validation.required })
+  allowedModels?: string[]
+
+  @IsOptional()
+  @IsObject({ message: fa.validation.required })
+  features?: Record<string, unknown>
+
+  @IsOptional()
+  @IsBoolean({ message: fa.validation.mustBeBoolean })
+  isActive?: boolean
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(0, { message: fa.validation.numberPositive })
+  sortOrder?: number
+}
