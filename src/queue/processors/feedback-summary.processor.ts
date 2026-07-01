@@ -48,7 +48,7 @@ export class FeedbackSummaryProcessor {
 
     const prompt = `${previousContext}New user feedbacks:\n${feedbackLines}\n\nAnalyze these feedbacks and return ONLY valid JSON with this exact shape:\n{"summary":"2-3 sentence Persian summary","topItems":[{"title":"item title in Persian","count":number,"category":"CATEGORY"}]}\nReturn 5-10 top items. No markdown, no explanation, just JSON.`
 
-    const modelId = this.config.get<string>('SUMMARY_MODEL') ?? 'gpt-4o-mini'
+    const modelId = this.config.get<string>('SUMMARY_MODEL') ?? 'openai/gpt-4o-mini'
     const { text } = await generateText({
       model: this.provider(modelId),
       prompt,

@@ -69,6 +69,7 @@ export const fa = {
     otpText: (code: string) => `کد تأیید دستیار AI: ${code}\nاین کد ۲ دقیقه اعتبار دارد`,
     subscriptionActivated: (planName: string, refId: string) =>
       `اشتراک ${planName} شما فعال شد. کد پیگیری: ${refId}`,
+    sendFailed: 'ارسال پیامک با خطا مواجه شد. لطفاً دوباره تلاش کنید',
   },
   users: {
     notFound: 'کاربر یافت نشد',

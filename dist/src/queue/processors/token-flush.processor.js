@@ -25,22 +25,37 @@ let TokenFlushProcessor = TokenFlushProcessor_1 = class TokenFlushProcessor {
     }
     async handleFlush() {
         const today = new Date().toISOString().slice(0, 10);
-        const keys = await this.scanKeys(`token:free:*:${today}`);
-        if (!keys.length)
+        const date = new Date(today);
+        const [freeKeys, dpKeys, reqKeys] = await Promise.all([
+            this.scanKeys(`token:free:*:${today}`),
+            this.scanKeys(`token:dailypaid:*:${today}`),
+            this.scanKeys(`token:req:*:${today}`),
+        ]);
+        if (!freeKeys.length && !dpKeys.length && !reqKeys.length)
             return;
-        const values = await Promise.all(keys.map(k => this.redis.get(k)));
-        const upserts = keys.map((key, i) => {
-            const userId = key.split(':')[2];
-            const freeTokensUsed = Number(values[i]) || 0;
-            const date = new Date(today);
-            return this.prisma.dailyUsage.upsert({
-                where: { userId_date: { userId, date } },
-                create: { userId, date, freeTokensUsed },
-                update: { freeTokensUsed },
-            });
+        const allKeys = [...freeKeys, ...dpKeys, ...reqKeys];
+        const values = await Promise.all(allKeys.map(k => this.redis.get(k)));
+        const userMap = new Map();
+        const row = (id) => {
+            if (!userMap.has(id))
+                userMap.set(id, { freeTokensUsed: 0, paidTokensUsed: 0, requestsCount: 0 });
+            return userMap.get(id);
+        };
+        freeKeys.forEach((k, i) => {
+            row(k.split(':')[2]).freeTokensUsed = Number(values[i]) || 0;
         });
-        await Promise.all(upserts);
-        this.logger.log(`Token flush: synced ${keys.length} users for ${today}`);
+        dpKeys.forEach((k, i) => {
+            row(k.split(':')[2]).paidTokensUsed = Number(values[freeKeys.length + i]) || 0;
+        });
+        reqKeys.forEach((k, i) => {
+            row(k.split(':')[2]).requestsCount = Number(values[freeKeys.length + dpKeys.length + i]) || 0;
+        });
+        await Promise.all(Array.from(userMap.entries()).map(([userId, data]) => this.prisma.dailyUsage.upsert({
+            where: { userId_date: { userId, date } },
+            create: { userId, date, ...data },
+            update: data,
+        })));
+        this.logger.log(`Token flush: synced ${userMap.size} users for ${today}`);
     }
     scanKeys(pattern) {
         return new Promise((resolve, reject) => {

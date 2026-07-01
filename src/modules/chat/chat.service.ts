@@ -9,6 +9,17 @@ import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
 
+// models stored before the openai/ prefix convention was introduced
+const LEGACY_MODEL_MAP: Record<string, string> = {
+  'gpt-4o-mini': 'openai/gpt-4o-mini',
+  'gpt-4o': 'openai/gpt-4o',
+  'gpt-4-turbo': 'openai/gpt-4-turbo',
+}
+
+function resolveModelId(id: string): string {
+  return LEGACY_MODEL_MAP[id] ?? id
+}
+
 @Injectable()
 export class ChatService {
   private readonly provider
@@ -41,7 +52,7 @@ export class ChatService {
       if (!conversation) throw new NotFoundException(fa.conversations.notFound)
       if (conversation.userId !== userId) throw new ForbiddenException(fa.conversations.forbidden)
 
-      const modelId = dto.model ?? conversation.model
+      const modelId = resolveModelId(dto.model ?? conversation.model)
       const plan = await this.tokenService.getCachedPlan(userId)
 
       if (!(plan.allowedModels as string[]).includes(modelId)) {

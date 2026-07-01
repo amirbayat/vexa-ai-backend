@@ -25,6 +25,18 @@ function monthKey(userId: string) {
   return `token:paid:${userId}:${m}`
 }
 
+// daily paid — same granularity as free, flushed to dailyUsage.paidTokensUsed
+function dailyPaidKey(userId: string) {
+  const d = new Date().toISOString().slice(0, 10)
+  return `token:dailypaid:${userId}:${d}`
+}
+
+// request count per day — flushed to dailyUsage.requestsCount
+function reqKey(userId: string) {
+  const d = new Date().toISOString().slice(0, 10)
+  return `token:req:${userId}:${d}`
+}
+
 function planCacheKey(userId: string) {
   return `plan:${userId}`
 }
@@ -58,14 +70,27 @@ export class TokenService {
   }
 
   async increment(userId: string, tokens: number, source: 'free' | 'paid') {
+    const rKey = reqKey(userId)
+
     if (source === 'free') {
-      const key = todayKey(userId)
-      await this.redis.incrby(key, tokens)
-      await this.redis.expire(key, 90_000, 'NX') // 25h
+      const fKey = todayKey(userId)
+      await Promise.all([
+        this.redis.incrby(fKey, tokens),
+        this.redis.expire(fKey, 90_000, 'NX'),   // 25h
+        this.redis.incr(rKey),
+        this.redis.expire(rKey, 90_000, 'NX'),
+      ])
     } else {
-      const key = monthKey(userId)
-      await this.redis.incrby(key, tokens)
-      await this.redis.expire(key, 2_764_800, 'NX') // 32d
+      const mKey = monthKey(userId)
+      const dpKey = dailyPaidKey(userId)
+      await Promise.all([
+        this.redis.incrby(mKey, tokens),
+        this.redis.expire(mKey, 2_764_800, 'NX'), // 32d
+        this.redis.incrby(dpKey, tokens),
+        this.redis.expire(dpKey, 90_000, 'NX'),   // 25h
+        this.redis.incr(rKey),
+        this.redis.expire(rKey, 90_000, 'NX'),
+      ])
     }
   }
 
@@ -123,7 +148,7 @@ export class TokenService {
           monthlyTotalTokens: sub.plan.monthlyTotalTokens,
           allowedModels: sub.plan.allowedModels as string[],
         }
-      : { dailyFreeTokens: 5000, monthlyTotalTokens: 0, allowedModels: ['gpt-4o-mini'] }
+      : { dailyFreeTokens: 5000, monthlyTotalTokens: 0, allowedModels: ['openai/gpt-4o-mini'] }
 
     await this.redis.set(planCacheKey(userId), JSON.stringify(limits), 'EX', 3600)
     return limits

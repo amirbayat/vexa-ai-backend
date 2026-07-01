@@ -68,6 +68,7 @@ export declare const fa: {
     readonly sms: {
         readonly otpText: (code: string) => string;
         readonly subscriptionActivated: (planName: string, refId: string) => string;
+        readonly sendFailed: "ارسال پیامک با خطا مواجه شد. لطفاً دوباره تلاش کنید";
     };
     readonly users: {
         readonly notFound: "کاربر یافت نشد";

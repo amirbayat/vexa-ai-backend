@@ -17,6 +17,14 @@ const ai_1 = require("ai");
 const prisma_service_1 = require("../../prisma/prisma.service");
 const token_service_1 = require("../usage/token.service");
 const fa_1 = require("../../i18n/fa");
+const LEGACY_MODEL_MAP = {
+    'gpt-4o-mini': 'openai/gpt-4o-mini',
+    'gpt-4o': 'openai/gpt-4o',
+    'gpt-4-turbo': 'openai/gpt-4-turbo',
+};
+function resolveModelId(id) {
+    return LEGACY_MODEL_MAP[id] ?? id;
+}
 let ChatService = class ChatService {
     prisma;
     tokenService;
@@ -47,7 +55,7 @@ let ChatService = class ChatService {
                 throw new common_1.NotFoundException(fa_1.fa.conversations.notFound);
             if (conversation.userId !== userId)
                 throw new common_1.ForbiddenException(fa_1.fa.conversations.forbidden);
-            const modelId = dto.model ?? conversation.model;
+            const modelId = resolveModelId(dto.model ?? conversation.model);
             const plan = await this.tokenService.getCachedPlan(userId);
             if (!plan.allowedModels.includes(modelId)) {
                 throw new common_1.ForbiddenException(fa_1.fa.chat.modelNotAllowed);

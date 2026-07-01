@@ -10,7 +10,7 @@ const plans = [
     priceMonthly: 0,
     dailyFreeTokens: 5_000,
     monthlyTotalTokens: 0,
-    allowedModels: ['gpt-4o-mini'],
+    allowedModels: ['openai/gpt-4o-mini'],
     features: {
       chatHistory: true,
       maxConversations: 10,
@@ -24,7 +24,7 @@ const plans = [
     priceMonthly: 1_500_000, // 150,000 Tomans in Rials
     dailyFreeTokens: 10_000,
     monthlyTotalTokens: 500_000,
-    allowedModels: ['gpt-4o-mini', 'gpt-4o'],
+    allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o'],
     features: {
       chatHistory: true,
       maxConversations: 100,
@@ -39,7 +39,7 @@ const plans = [
     priceMonthly: 3_500_000, // 350,000 Tomans in Rials
     dailyFreeTokens: 20_000,
     monthlyTotalTokens: 2_000_000,
-    allowedModels: ['gpt-4o-mini', 'gpt-4o', 'claude-sonnet-4-6'],
+    allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'openai/gpt-4.1'],
     features: {
       chatHistory: true,
       maxConversations: -1, // unlimited

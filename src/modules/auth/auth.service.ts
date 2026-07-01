@@ -1,7 +1,6 @@
 import {
   HttpException,
   Injectable,
-  Logger,
   UnauthorizedException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
@@ -9,6 +8,7 @@ import { JwtService } from '@nestjs/jwt'
 import * as crypto from 'crypto'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
+import { SmsService } from '../../sms/sms.service'
 import { fa } from '../../i18n/fa'
 
 const OTP_TTL = 120        // seconds — 2 min
@@ -27,13 +27,12 @@ function otpAttemptKey(phone: string) { return `otp:attempt:${phone}` }
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name)
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly sms: SmsService,
   ) {}
 
   async sendOtp(rawPhone: string): Promise<{ message: string }> {
@@ -50,9 +49,7 @@ export class AuthService {
     const code = Math.floor(100000 + Math.random() * 900000).toString()
     await this.redis.set(otpKey(phone), code, 'EX', OTP_TTL)
 
-    // SMS disabled in dev — log OTP to console
-    // In production: await this.smsService.send(phone, fa.sms.otpText(code))
-    this.logger.warn(`🔑 OTP ══════════════════ ${phone}  →  ${code} ══════════════════`)
+    await this.sms.sendOtp(phone, code)
 
     return { message: fa.auth.otpSent }
   }
@@ -84,7 +81,11 @@ export class AuthService {
 
     if (!user.isActive) throw new UnauthorizedException(fa.auth.userDisabled)
 
-    return this.issueTokens(user.id, user.phone, user.role)
+    const tokens = await this.issueTokens(user.id, user.phone, user.role)
+    return {
+      ...tokens,
+      user: { id: user.id, phone: user.phone, role: user.role, name: user.name },
+    }
   }
 
   async refresh(rawToken: string) {

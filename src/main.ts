@@ -18,11 +18,12 @@ async function bootstrap() {
 
   app.useGlobalFilters(new AllExceptionsFilter())
 
+  const allowedOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:5174').split(',')
   app.enableCors({
-    origin: process.env.APP_URL,
+    origin: allowedOrigins,
     credentials: true,
   })
 
-  await app.listen(process.env.PORT ?? 3001)
+  await app.listen(process.env.PORT ?? 3000)
 }
 bootstrap()

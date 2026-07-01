@@ -10,6 +10,12 @@ export declare class AuthController {
         message: string;
     }>;
     verifyOtp(dto: VerifyOtpDto): Promise<{
+        user: {
+            id: string;
+            phone: string;
+            role: import("@prisma/client").$Enums.Role;
+            name: string | null;
+        };
         accessToken: string;
         refreshToken: string;
     }>;

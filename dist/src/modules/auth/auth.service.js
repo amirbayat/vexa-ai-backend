@@ -49,6 +49,7 @@ const jwt_1 = require("@nestjs/jwt");
 const crypto = __importStar(require("crypto"));
 const prisma_service_1 = require("../../prisma/prisma.service");
 const redis_service_1 = require("../../redis/redis.service");
+const sms_service_1 = require("../../sms/sms.service");
 const fa_1 = require("../../i18n/fa");
 const OTP_TTL = 120;
 const OTP_RATE_LIMIT = 3;
@@ -66,11 +67,13 @@ let AuthService = class AuthService {
     redis;
     jwt;
     config;
-    constructor(prisma, redis, jwt, config) {
+    sms;
+    constructor(prisma, redis, jwt, config, sms) {
         this.prisma = prisma;
         this.redis = redis;
         this.jwt = jwt;
         this.config = config;
+        this.sms = sms;
     }
     async sendOtp(rawPhone) {
         const phone = normalizePhone(rawPhone);
@@ -83,7 +86,7 @@ let AuthService = class AuthService {
         }
         const code = Math.floor(100000 + Math.random() * 900000).toString();
         await this.redis.set(otpKey(phone), code, 'EX', OTP_TTL);
-        console.log(`[OTP] ${phone}: ${code}`);
+        await this.sms.sendOtp(phone, code);
         return { message: fa_1.fa.auth.otpSent };
     }
     async verifyOtp(rawPhone, code) {
@@ -108,7 +111,11 @@ let AuthService = class AuthService {
         });
         if (!user.isActive)
             throw new common_1.UnauthorizedException(fa_1.fa.auth.userDisabled);
-        return this.issueTokens(user.id, user.phone, user.role);
+        const tokens = await this.issueTokens(user.id, user.phone, user.role);
+        return {
+            ...tokens,
+            user: { id: user.id, phone: user.phone, role: user.role, name: user.name },
+        };
     }
     async refresh(rawToken) {
         const hash = crypto.createHash('sha256').update(rawToken).digest('hex');
@@ -175,6 +182,7 @@ exports.AuthService = AuthService = __decorate([
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
         redis_service_1.RedisService,
         jwt_1.JwtService,
-        config_1.ConfigService])
+        config_1.ConfigService,
+        sms_service_1.SmsService])
 ], AuthService);
 //# sourceMappingURL=auth.service.js.map
