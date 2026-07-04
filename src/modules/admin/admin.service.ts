@@ -315,4 +315,45 @@ export class AdminService {
       count: Number(r.count),
     }))
   }
+
+  // ── AI Models ────────────────────────────────────────────────────────────
+
+  getModels() {
+    return this.prisma.aiModel.findMany({ orderBy: { sortOrder: 'asc' } })
+  }
+
+  createModel(dto: {
+    name: string
+    displayName: string
+    provider: string
+    inputPricePerM: number
+    outputPricePerM: number
+    supportsVision: boolean
+    isActive: boolean
+    sortOrder: number
+  }) {
+    return this.prisma.aiModel.create({ data: dto })
+  }
+
+  async updateModel(id: string, dto: Partial<{
+    name: string
+    displayName: string
+    provider: string
+    inputPricePerM: number
+    outputPricePerM: number
+    supportsVision: boolean
+    isActive: boolean
+    sortOrder: number
+  }>) {
+    const model = await this.prisma.aiModel.findUnique({ where: { id } })
+    if (!model) throw new NotFoundException('مدل یافت نشد')
+    return this.prisma.aiModel.update({ where: { id }, data: dto })
+  }
+
+  async deleteModel(id: string) {
+    const model = await this.prisma.aiModel.findUnique({ where: { id } })
+    if (!model) throw new NotFoundException('مدل یافت نشد')
+    await this.prisma.aiModel.delete({ where: { id } })
+    return { message: 'مدل حذف شد' }
+  }
 }

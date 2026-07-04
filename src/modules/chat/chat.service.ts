@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, HttpException, Injectable, Not
 import { ConfigService } from '@nestjs/config'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { streamText, generateText } from 'ai'
-import type { ModelMessage } from 'ai'
+import type { ModelMessage, UserModelMessage } from 'ai'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { TokenService } from '../usage/token.service'
@@ -105,8 +105,25 @@ export class ChatService {
     const { cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier)
 
     let modelId = resolveModelId(dto.model ?? conversation.model)
-    if (!(plan.allowedModels as string[]).includes(modelId)) {
-      throw new ForbiddenException(fa.chat.modelNotAllowed)
+    const allowed = plan.allowedModels as string[]
+    if (!allowed.includes(modelId)) {
+      if (allowed.length > 0) {
+        modelId = allowed[0]  // silently fall back to first allowed model
+      } else {
+        throw new ForbiddenException(fa.chat.modelNotAllowed)
+      }
+    }
+
+    // ── vision check (preflight) ──────────────────────────────────────────
+    if (dto.images?.length) {
+      const modelKey = dto.model ?? conversation.model
+      const modelRecord = await this.prisma.aiModel.findFirst({
+        where: { name: modelKey, isActive: true },
+        select: { supportsVision: true },
+      })
+      if (modelRecord && !modelRecord.supportsVision) {
+        throw new BadRequestException('این مدل از تصویر پشتیبانی نمی‌کند. لطفاً یک مدل Vision‌دار انتخاب کنید.')
+      }
     }
 
     const quota = await this.tokenService.checkQuota(userId)
@@ -146,7 +163,12 @@ export class ChatService {
 
     try {
       await this.prisma.message.create({
-        data: { conversationId, role: 'USER', content: dto.content },
+        data: {
+          conversationId,
+          role: 'USER',
+          content: dto.content,
+          ...(dto.images?.length ? { images: dto.images } : {}),
+        },
       })
 
       // ── build context: use summary + last 5 msgs if summary exists ─────────
@@ -172,10 +194,24 @@ export class ChatService {
         })
       }
 
-      const coreMessages: ModelMessage[] = recentMessages.map(m => ({
-        role: m.role === 'USER' ? 'user' : m.role === 'ASSISTANT' ? 'assistant' : 'system',
-        content: m.content,
-      }))
+      const hasImages = Boolean(dto.images?.length)
+      const coreMessages: ModelMessage[] = recentMessages.map((m, idx) => {
+        const isLast = idx === recentMessages.length - 1
+        if (isLast && m.role === 'USER' && hasImages) {
+          const visionMsg: UserModelMessage = {
+            role: 'user',
+            content: [
+              ...dto.images!.map(img => ({ type: 'image' as const, image: img })),
+              { type: 'text' as const, text: m.content },
+            ],
+          }
+          return visionMsg
+        }
+        return {
+          role: m.role === 'USER' ? 'user' : m.role === 'ASSISTANT' ? 'assistant' : 'system',
+          content: m.content,
+        }
+      })
 
       const result = streamText({
         model: this.provider(modelId),

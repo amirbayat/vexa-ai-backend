@@ -94,8 +94,24 @@ let ChatService = class ChatService {
         }
         const { cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier);
         let modelId = resolveModelId(dto.model ?? conversation.model);
-        if (!plan.allowedModels.includes(modelId)) {
-            throw new common_1.ForbiddenException(fa_1.fa.chat.modelNotAllowed);
+        const allowed = plan.allowedModels;
+        if (!allowed.includes(modelId)) {
+            if (allowed.length > 0) {
+                modelId = allowed[0];
+            }
+            else {
+                throw new common_1.ForbiddenException(fa_1.fa.chat.modelNotAllowed);
+            }
+        }
+        if (dto.images?.length) {
+            const modelKey = dto.model ?? conversation.model;
+            const modelRecord = await this.prisma.aiModel.findFirst({
+                where: { name: modelKey, isActive: true },
+                select: { supportsVision: true },
+            });
+            if (modelRecord && !modelRecord.supportsVision) {
+                throw new common_1.BadRequestException('این مدل از تصویر پشتیبانی نمی‌کند. لطفاً یک مدل Vision‌دار انتخاب کنید.');
+            }
         }
         const quota = await this.tokenService.checkQuota(userId);
         const throttledMax = this.tokenService.resolveOutputThrottle(plan.outputThrottleSteps, todayCount);
@@ -127,7 +143,12 @@ let ChatService = class ChatService {
         }
         try {
             await this.prisma.message.create({
-                data: { conversationId, role: 'USER', content: dto.content },
+                data: {
+                    conversationId,
+                    role: 'USER',
+                    content: dto.content,
+                    ...(dto.images?.length ? { images: dto.images } : {}),
+                },
             });
             const systemParts = [];
             if (conversation.systemPrompt)
@@ -151,10 +172,24 @@ let ChatService = class ChatService {
                     select: { role: true, content: true },
                 });
             }
-            const coreMessages = recentMessages.map(m => ({
-                role: m.role === 'USER' ? 'user' : m.role === 'ASSISTANT' ? 'assistant' : 'system',
-                content: m.content,
-            }));
+            const hasImages = Boolean(dto.images?.length);
+            const coreMessages = recentMessages.map((m, idx) => {
+                const isLast = idx === recentMessages.length - 1;
+                if (isLast && m.role === 'USER' && hasImages) {
+                    const visionMsg = {
+                        role: 'user',
+                        content: [
+                            ...dto.images.map(img => ({ type: 'image', image: img })),
+                            { type: 'text', text: m.content },
+                        ],
+                    };
+                    return visionMsg;
+                }
+                return {
+                    role: m.role === 'USER' ? 'user' : m.role === 'ASSISTANT' ? 'assistant' : 'system',
+                    content: m.content,
+                };
+            });
             const result = (0, ai_1.streamText)({
                 model: this.provider(modelId),
                 system: systemParts.join('\n\n') || undefined,

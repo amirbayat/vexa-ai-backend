@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator'
+import { IsOptional, IsString, IsArray, ArrayMaxSize, MaxLength } from 'class-validator'
 import { fa } from '../../../i18n/fa'
 
 export class StreamMessageDto {
@@ -10,4 +10,10 @@ export class StreamMessageDto {
   @IsString({ message: fa.validation.required })
   @MaxLength(50, { message: fa.validation.stringTooLong })
   model?: string
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  images?: string[]
 }

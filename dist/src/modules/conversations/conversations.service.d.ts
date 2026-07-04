@@ -36,6 +36,7 @@ export declare class ConversationsService {
             createdAt: Date;
             model: string | null;
             content: string;
+            images: import("@prisma/client/runtime/client").JsonValue | null;
             tokensInput: number;
             tokensOutput: number;
             conversationId: string;

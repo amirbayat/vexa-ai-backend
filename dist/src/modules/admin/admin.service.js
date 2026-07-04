@@ -279,6 +279,25 @@ let AdminService = class AdminService {
             count: Number(r.count),
         }));
     }
+    getModels() {
+        return this.prisma.aiModel.findMany({ orderBy: { sortOrder: 'asc' } });
+    }
+    createModel(dto) {
+        return this.prisma.aiModel.create({ data: dto });
+    }
+    async updateModel(id, dto) {
+        const model = await this.prisma.aiModel.findUnique({ where: { id } });
+        if (!model)
+            throw new common_1.NotFoundException('مدل یافت نشد');
+        return this.prisma.aiModel.update({ where: { id }, data: dto });
+    }
+    async deleteModel(id) {
+        const model = await this.prisma.aiModel.findUnique({ where: { id } });
+        if (!model)
+            throw new common_1.NotFoundException('مدل یافت نشد');
+        await this.prisma.aiModel.delete({ where: { id } });
+        return { message: 'مدل حذف شد' };
+    }
 };
 exports.AdminService = AdminService;
 exports.AdminService = AdminService = __decorate([

@@ -15,6 +15,7 @@ const fa_1 = require("../../../i18n/fa");
 class StreamMessageDto {
     content;
     model;
+    images;
 }
 exports.StreamMessageDto = StreamMessageDto;
 __decorate([
@@ -28,4 +29,11 @@ __decorate([
     (0, class_validator_1.MaxLength)(50, { message: fa_1.fa.validation.stringTooLong }),
     __metadata("design:type", String)
 ], StreamMessageDto.prototype, "model", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ArrayMaxSize)(5),
+    (0, class_validator_1.IsString)({ each: true }),
+    __metadata("design:type", Array)
+], StreamMessageDto.prototype, "images", void 0);
 //# sourceMappingURL=stream-message.dto.js.map

@@ -1,0 +1,63 @@
+import { IsString, IsOptional, IsArray, IsNumber, ValidateNested, IsIn } from 'class-validator'
+import { Type } from 'class-transformer'
+
+export class SalesChatMessageDto {
+  @IsString()
+  @IsIn(['user', 'assistant'])
+  role: 'user' | 'assistant'
+
+  @IsString()
+  content: string
+}
+
+export class SalesChatDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SalesChatMessageDto)
+  messages: SalesChatMessageDto[]
+
+  @IsString()
+  sessionId: string
+}
+
+export class SaveLeadDto {
+  @IsOptional()
+  @IsString()
+  sessionId?: string
+
+  @IsOptional()
+  @IsString()
+  phone?: string
+
+  @IsOptional()
+  @IsString()
+  name?: string
+
+  @IsOptional()
+  @IsNumber()
+  age?: number
+
+  @IsOptional()
+  @IsString()
+  city?: string
+
+  @IsOptional()
+  @IsString()
+  jobTitle?: string
+
+  @IsOptional()
+  @IsArray()
+  interests?: string[]
+
+  @IsOptional()
+  @IsArray()
+  chatHistory?: SalesChatMessageDto[]
+
+  @IsOptional()
+  @IsString()
+  recommendedPlan?: string
+
+  @IsOptional()
+  @IsString()
+  source?: string
+}

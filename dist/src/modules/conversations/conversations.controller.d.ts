@@ -37,6 +37,7 @@ export declare class ConversationsController {
             createdAt: Date;
             model: string | null;
             content: string;
+            images: import("@prisma/client/runtime/client").JsonValue | null;
             tokensInput: number;
             tokensOutput: number;
             conversationId: string;

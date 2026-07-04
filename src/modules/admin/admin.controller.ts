@@ -102,4 +102,35 @@ export class AdminController {
   updateTicketStatus(@Param('id') id: string, @Body() dto: UpdateTicketStatusDto) {
     return this.ticketsService.updateStatus(id, dto.status, dto.priority, dto.adminNote)
   }
+
+  // ── AI Models ───────────────────────────────────────────────────────────────
+
+  @Get('models')
+  getModels() {
+    return this.adminService.getModels()
+  }
+
+  @Post('models')
+  createModel(@Body() body: {
+    name: string
+    displayName: string
+    provider: string
+    inputPricePerM: number
+    outputPricePerM: number
+    supportsVision: boolean
+    isActive: boolean
+    sortOrder: number
+  }) {
+    return this.adminService.createModel(body)
+  }
+
+  @Patch('models/:id')
+  updateModel(@Param('id') id: string, @Body() body: object) {
+    return this.adminService.updateModel(id, body)
+  }
+
+  @Delete('models/:id')
+  deleteModel(@Param('id') id: string) {
+    return this.adminService.deleteModel(id)
+  }
 }

@@ -71,6 +71,18 @@ let AdminController = class AdminController {
     updateTicketStatus(id, dto) {
         return this.ticketsService.updateStatus(id, dto.status, dto.priority, dto.adminNote);
     }
+    getModels() {
+        return this.adminService.getModels();
+    }
+    createModel(body) {
+        return this.adminService.createModel(body);
+    }
+    updateModel(id, body) {
+        return this.adminService.updateModel(id, body);
+    }
+    deleteModel(id) {
+        return this.adminService.deleteModel(id);
+    }
 };
 exports.AdminController = AdminController;
 __decorate([
@@ -181,6 +193,34 @@ __decorate([
     __metadata("design:paramtypes", [String, update_ticket_status_dto_1.UpdateTicketStatusDto]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateTicketStatus", null);
+__decorate([
+    (0, common_1.Get)('models'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "getModels", null);
+__decorate([
+    (0, common_1.Post)('models'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "createModel", null);
+__decorate([
+    (0, common_1.Patch)('models/:id'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateModel", null);
+__decorate([
+    (0, common_1.Delete)('models/:id'),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "deleteModel", null);
 exports.AdminController = AdminController = __decorate([
     (0, common_1.Controller)('admin'),
     (0, common_1.UseGuards)(jwt_guard_1.JwtGuard, admin_guard_1.AdminGuard),

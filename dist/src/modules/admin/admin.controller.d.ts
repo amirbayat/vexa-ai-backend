@@ -189,4 +189,52 @@ export declare class AdminController {
             adminNote: string | null;
         };
     }>;
+    getModels(): import("@prisma/client").Prisma.PrismaPromise<{
+        id: string;
+        name: string;
+        isActive: boolean;
+        createdAt: Date;
+        sortOrder: number;
+        displayName: string;
+        provider: string;
+        inputPricePerM: number;
+        outputPricePerM: number;
+        supportsVision: boolean;
+    }[]>;
+    createModel(body: {
+        name: string;
+        displayName: string;
+        provider: string;
+        inputPricePerM: number;
+        outputPricePerM: number;
+        supportsVision: boolean;
+        isActive: boolean;
+        sortOrder: number;
+    }): import("@prisma/client").Prisma.Prisma__AiModelClient<{
+        id: string;
+        name: string;
+        isActive: boolean;
+        createdAt: Date;
+        sortOrder: number;
+        displayName: string;
+        provider: string;
+        inputPricePerM: number;
+        outputPricePerM: number;
+        supportsVision: boolean;
+    }, never, import("@prisma/client/runtime/client").DefaultArgs, import("@prisma/client").Prisma.PrismaClientOptions>;
+    updateModel(id: string, body: object): Promise<{
+        id: string;
+        name: string;
+        isActive: boolean;
+        createdAt: Date;
+        sortOrder: number;
+        displayName: string;
+        provider: string;
+        inputPricePerM: number;
+        outputPricePerM: number;
+        supportsVision: boolean;
+    }>;
+    deleteModel(id: string): Promise<{
+        message: string;
+    }>;
 }

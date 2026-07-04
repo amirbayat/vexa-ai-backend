@@ -105,6 +105,7 @@ model Message {
   conversationId String
   role           MessageRole
   content        String
+  images         Json?
   tokensInput    Int         @default(0)
   tokensOutput   Int         @default(0)
   model          String?
@@ -308,4 +309,36 @@ enum TicketPriority {
   NORMAL
   HIGH
   URGENT
+}
+
+model AiModel {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  displayName     String
+  provider        String
+  inputPricePerM  Float    @default(0)
+  outputPricePerM Float    @default(0)
+  supportsVision  Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  @@map("ai_models")
+}
+
+model LeadProfile {
+  id              String   @id @default(uuid())
+  sessionId       String?  @unique
+  phone           String?
+  name            String?
+  age             Int?
+  city            String?
+  jobTitle        String?
+  interests       Json?
+  chatHistory     Json?
+  recommendedPlan String?
+  source          String   @default("pricing_page")
+  createdAt       DateTime @default(now())
+
+  @@map("lead_profiles")
 }
