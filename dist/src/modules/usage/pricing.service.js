@@ -25,6 +25,10 @@ function monthlyCostKey(userId) {
     const m = new Date().toISOString().slice(0, 7);
     return `cost:monthly:${userId}:${m}`;
 }
+function dailyCostUsdKey(userId) {
+    const d = new Date().toISOString().slice(0, 10);
+    return `cost_usd:daily:${userId}:${d}`;
+}
 let PricingService = class PricingService {
     config;
     prisma;
@@ -50,11 +54,14 @@ let PricingService = class PricingService {
         this.freeBudgetRial = Number(this.config.get('FREE_PLAN_MONTHLY_BUDGET_RIAL', '50000'));
         this.walletMarkup = Number(this.config.get('WALLET_MARKUP', '1.667'));
     }
-    async calcCostRial(inputTokens, outputTokens, modelId) {
+    async calcCost(inputTokens, outputTokens, modelId) {
         const price = await this.modelRegistry.getModelInfo(modelId);
         const usdCost = (inputTokens * price.inputPricePerM + outputTokens * price.outputPricePerM) / 1_000_000;
         const rate = await this.exchangeRate.getUsdtRial();
-        return Math.ceil(usdCost * rate);
+        return {
+            costRial: Math.ceil(usdCost * rate),
+            costUsdMicros: Math.round(usdCost * 1_000_000),
+        };
     }
     async dailyBudgetRial(priceMonthly) {
         if (priceMonthly === 0)
@@ -69,14 +76,17 @@ let PricingService = class PricingService {
     walletCostForRial(baseRial) {
         return Math.ceil(baseRial * this.walletMarkup);
     }
-    async trackCost(userId, costRial) {
+    async trackCost(userId, costRial, costUsdMicros = 0) {
         const dKey = dailyCostKey(userId);
         const mKey = monthlyCostKey(userId);
+        const dUsdKey = dailyCostUsdKey(userId);
         await Promise.all([
             this.redis.incrby(dKey, costRial),
             this.redis.expire(dKey, 90_000, 'NX'),
             this.redis.incrby(mKey, costRial),
             this.redis.expire(mKey, 2_764_800, 'NX'),
+            this.redis.incrby(dUsdKey, costUsdMicros),
+            this.redis.expire(dUsdKey, 90_000, 'NX'),
         ]);
     }
     async getSpentToday(userId) {

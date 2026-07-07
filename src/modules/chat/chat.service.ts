@@ -15,6 +15,8 @@ import { TokenService } from '../usage/token.service'
 import { PricingService } from '../usage/pricing.service'
 import { TokenEstimatorService } from '../usage/token-estimator.service'
 import { ModelRouterService } from '../model-router/model-router.service'
+import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service'
+import { TopicService } from '../usage-analytics/topic.service'
 import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
@@ -50,6 +52,8 @@ export class ChatService {
     private readonly pricingService: PricingService,
     private readonly tokenEstimator: TokenEstimatorService,
     private readonly modelRouter: ModelRouterService,
+    private readonly usageAnalytics: UsageAnalyticsService,
+    private readonly topicService: TopicService,
     private readonly config: ConfigService,
   ) {
     this.provider = createOpenAICompatible({
@@ -110,6 +114,7 @@ export class ChatService {
     if (N !== null) {
       if (todayCount >= N + M) {
         // ── BLOCKED ────────────────────────────────────────────────────────
+        this.usageAnalytics.logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED').catch(() => {})
         throw new HttpException(
           {
             message: fa.chat.dailyBlocked,
@@ -135,15 +140,22 @@ export class ChatService {
       PRE_ROUTING_REFERENCE_MODEL,
     )
     if (estimatedInput > effectiveInputLimit) {
+      this.usageAnalytics.logLimitHit(userId, 'INPUT_TOO_LONG').catch(() => {})
       throw new BadRequestException(fa.chat.inputTooLong(effectiveInputLimit))
     }
 
     // ── budget check + cascade model ───────────────────────────────────────
-    const { cascadeModel } = await this.pricingService.assertBudget(
-      userId,
-      plan.priceMonthly,
-      plan.planTier,
-    )
+    let cascadeModel: string | null
+    try {
+      ;({ cascadeModel } = await this.pricingService.assertBudget(
+        userId,
+        plan.priceMonthly,
+        plan.planTier,
+      ))
+    } catch (err) {
+      this.usageAnalytics.logLimitHit(userId, 'BUDGET_EXCEEDED').catch(() => {})
+      throw err
+    }
 
     const allowed = plan.allowedModels
     if (allowed.length === 0)
@@ -243,11 +255,14 @@ export class ChatService {
     }
 
     try {
+      const topicId = await this.topicService.classify(dto.content)
       await this.prisma.message.create({
         data: {
           conversationId,
+          userId,
           role: 'USER',
           content: dto.content,
+          ...(topicId ? { topicId } : {}),
           ...(dto.images?.length ? { images: dto.images } : {}),
         },
       })
@@ -321,7 +336,7 @@ export class ChatService {
 
       const usage = await result.usage
       const tokensUsed = usage.totalTokens ?? 0
-      const costRial = await this.pricingService.calcCostRial(
+      const { costRial, costUsdMicros } = await this.pricingService.calcCost(
         usage.inputTokens ?? 0,
         usage.outputTokens ?? 0,
         modelId,
@@ -330,17 +345,20 @@ export class ChatService {
       await this.prisma.message.create({
         data: {
           conversationId,
+          userId,
           role: 'ASSISTANT',
           content: fullContent,
           tokensInput: usage.inputTokens ?? 0,
           tokensOutput: usage.outputTokens ?? 0,
+          costRial,
+          costUsdMicros,
           model: modelId,
         },
       })
 
       await Promise.all([
         this.tokenService.increment(userId, tokensUsed, quota.source),
-        this.pricingService.trackCost(userId, costRial),
+        this.pricingService.trackCost(userId, costRial, costUsdMicros),
         this.prisma.conversation.update({
           where: { id: conversationId },
           data: {

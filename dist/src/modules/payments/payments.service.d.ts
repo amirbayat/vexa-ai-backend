@@ -28,8 +28,8 @@ export declare class PaymentsService {
         planId: string;
         status: import("@prisma/client").$Enums.PaymentStatus;
         metadata: import("@prisma/client/runtime/client").JsonValue | null;
-        authority: string | null;
         amount: number;
+        authority: string | null;
         refId: string | null;
     })[]>;
     getHistory(userId: string): import("@prisma/client").Prisma.PrismaPromise<({
@@ -44,8 +44,8 @@ export declare class PaymentsService {
         planId: string;
         status: import("@prisma/client").$Enums.PaymentStatus;
         metadata: import("@prisma/client/runtime/client").JsonValue | null;
-        authority: string | null;
         amount: number;
+        authority: string | null;
         refId: string | null;
     })[]>;
 }

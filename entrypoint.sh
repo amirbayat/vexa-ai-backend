@@ -13,5 +13,9 @@ npx ts-node --transpile-only prisma/seeds/plans.seed.ts
 echo ">>> Seeding AI models..."
 npx ts-node --transpile-only prisma/seeds/models.seed.ts
 
+echo ">>> Seeding usage-analytics topics/segments..."
+npx ts-node --transpile-only prisma/seeds/topics.seed.ts
+npx ts-node --transpile-only prisma/seeds/segments.seed.ts
+
 echo ">>> Starting NestJS..."
 exec npm run start:dev

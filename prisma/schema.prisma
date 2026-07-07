@@ -16,6 +16,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   conversations  Conversation[]
+  messages       Message[]
   subscription   Subscription?
   payments       Payment[]
   refreshTokens  RefreshToken[]
@@ -24,6 +25,7 @@ model User {
   quotaOverride  UserQuotaOverride?
   wallet         Wallet?
   tickets        SupportTicket[]
+  limitHitEvents LimitHitEvent[]
 
   @@map("users")
 }
@@ -103,18 +105,26 @@ model Conversation {
 model Message {
   id             String      @id @default(uuid())
   conversationId String
+  userId         String? // denormalized از conversation.userId — برای groupBy تجمیعی آنالیز مصرف (بخش ۱۷) بدون join
   role           MessageRole
   content        String
   images         Json?
   tokensInput    Int         @default(0)
   tokensOutput   Int         @default(0)
+  costRial       Int         @default(0) // هزینه‌ی دقیق همین پیام، در لحظه‌ی ایجاد محاسبه‌شده — نه بازمحاسبه‌ی بعدی با نرخ/قیمت فعلی
+  costUsdMicros  Int         @default(0)
   model          String?
+  topicId        String?
   createdAt      DateTime    @default(now())
 
-  conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
   feedback     MessageFeedback?
+  topic        Topic?           @relation(fields: [topicId], references: [id])
 
   @@index([conversationId, createdAt])
+  @@index([userId, createdAt])
+  @@index([topicId, createdAt])
   @@map("messages")
 }
 
@@ -173,6 +183,7 @@ model DailyUsage {
   paidTokensUsed Int      @default(0)
   requestsCount  Int      @default(0)
   costRial       Int      @default(0)
+  costUsdMicros  Int      @default(0) // دلار × ۱٬۰۰۰٬۰۰۰ — نگه‌داشتن هزینه‌ی خام دلاری، مستقل از نوسان نرخ ارز
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -423,4 +434,60 @@ model LeadProfile {
   createdAt       DateTime @default(now())
 
   @@map("lead_profiles")
+}
+
+// ─── Usage Analytics ────────────────────────────────────────────────────────────
+
+model Topic {
+  id        String    @id @default(uuid())
+  name      String    @unique // "برنامه‌نویسی", "ترجمه", "نگارش", "پزشکی", "ریاضی", ...
+  keywords  Json // string[] — قابل ویرایش در ادمین
+  color     String? // برای نمودار، مثلاً "#4F46E5"
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  messages Message[]
+
+  @@map("topics")
+}
+
+// قوانین بخش‌بندی کاربران بر اساس پیام/توکن روزانه — عضویت on-the-fly محاسبه می‌شود
+// (docs/PRD-global-budget-gateway.md بخش ۱۷.۶)، این جدول فقط خودِ قانون‌ها را نگه می‌دارد
+model UserSegment {
+  id                String   @id @default(uuid())
+  label             String // "کم‌مصرف", "متوسط", "پرمصرف حرفه‌ای", ...
+  minMessagesPerDay Int?
+  maxMessagesPerDay Int?
+  minTokensPerDay   Int?
+  maxTokensPerDay   Int?
+  color             String?
+  sortOrder         Int      @default(0)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("user_segments")
+}
+
+model LimitHitEvent {
+  id        String        @id @default(uuid())
+  userId    String
+  type      LimitHitType
+  date      DateTime      @db.Date
+  createdAt DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([date, type])
+  @@index([userId, date])
+  @@map("limit_hit_events")
+}
+
+enum LimitHitType {
+  DAILY_MESSAGE_BLOCKED
+  BUDGET_EXCEEDED
+  SESSION_LIMIT
+  INPUT_TOO_LONG
+  ROLLING_WINDOW_BLOCKED
 }

@@ -31,6 +31,16 @@ function monthlyCostKey(userId: string) {
   return `cost:monthly:${userId}:${m}`
 }
 
+function dailyCostUsdKey(userId: string) {
+  const d = new Date().toISOString().slice(0, 10)
+  return `cost_usd:daily:${userId}:${d}`
+}
+
+export interface CostCalc {
+  costRial: number
+  costUsdMicros: number // دلار × ۱٬۰۰۰٬۰۰۰ — نگه‌داشتن هزینه‌ی خام دلاری برای آنالیز مستقل از نوسان نرخ ارز
+}
+
 @Injectable()
 export class PricingService {
   private readonly aiShare: number
@@ -57,12 +67,16 @@ export class PricingService {
 
   // قیمت هر مدل از AiModel (پنل ادمین) خوانده می‌شود، نه یک نگاشت هاردکد —
   // مدلی که در جدول نباشد دیگر بی‌صدا با قیمت gpt-4o-mini حساب نمی‌شود
-  // (docs/PRD-global-budget-gateway.md بخش ۹.۳)
-  async calcCostRial(inputTokens: number, outputTokens: number, modelId: string): Promise<number> {
+  // (docs/PRD-global-budget-gateway.md بخش ۹.۳). هزینه‌ی خام دلاری هم برگردانده
+  // می‌شود تا حسابداری آنالیز مصرف (بخش ۱۷.۵) مستقل از نوسان نرخ لحظه‌ای بماند.
+  async calcCost(inputTokens: number, outputTokens: number, modelId: string): Promise<CostCalc> {
     const price = await this.modelRegistry.getModelInfo(modelId)
     const usdCost = (inputTokens * price.inputPricePerM + outputTokens * price.outputPricePerM) / 1_000_000
     const rate = await this.exchangeRate.getUsdtRial()
-    return Math.ceil(usdCost * rate)
+    return {
+      costRial: Math.ceil(usdCost * rate),
+      costUsdMicros: Math.round(usdCost * 1_000_000),
+    }
   }
 
   async dailyBudgetRial(priceMonthly: number): Promise<number> {
@@ -79,14 +93,17 @@ export class PricingService {
     return Math.ceil(baseRial * this.walletMarkup)
   }
 
-  async trackCost(userId: string, costRial: number): Promise<void> {
+  async trackCost(userId: string, costRial: number, costUsdMicros = 0): Promise<void> {
     const dKey = dailyCostKey(userId)
     const mKey = monthlyCostKey(userId)
+    const dUsdKey = dailyCostUsdKey(userId)
     await Promise.all([
       this.redis.incrby(dKey, costRial),
       this.redis.expire(dKey, 90_000, 'NX'),
       this.redis.incrby(mKey, costRial),
       this.redis.expire(mKey, 2_764_800, 'NX'),
+      this.redis.incrby(dUsdKey, costUsdMicros),
+      this.redis.expire(dUsdKey, 90_000, 'NX'),
     ])
   }
 

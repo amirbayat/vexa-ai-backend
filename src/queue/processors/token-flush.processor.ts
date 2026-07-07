@@ -17,23 +17,25 @@ export class TokenFlushProcessor {
     const today = new Date().toISOString().slice(0, 10);
     const date = new Date(today);
 
-    const [freeKeys, dpKeys, reqKeys, costKeys] = await Promise.all([
+    const [freeKeys, dpKeys, reqKeys, costKeys, costUsdKeys] = await Promise.all([
       this.scanKeys(`token:free:*:${today}`),
       this.scanKeys(`token:dailypaid:*:${today}`),
       this.scanKeys(`token:req:*:${today}`),
       this.scanKeys(`cost:daily:*:${today}`),
+      this.scanKeys(`cost_usd:daily:*:${today}`),
     ]);
 
     if (
       !freeKeys.length &&
       !dpKeys.length &&
       !reqKeys.length &&
-      !costKeys.length
+      !costKeys.length &&
+      !costUsdKeys.length
     )
       return;
 
     // fetch all values in one round-trip batch
-    const allKeys = [...freeKeys, ...dpKeys, ...reqKeys, ...costKeys];
+    const allKeys = [...freeKeys, ...dpKeys, ...reqKeys, ...costKeys, ...costUsdKeys];
     const values = await Promise.all(allKeys.map((k) => this.redis.get(k)));
 
     // build userId → aggregated usage map
@@ -42,6 +44,7 @@ export class TokenFlushProcessor {
       paidTokensUsed: number;
       requestsCount: number;
       costRial: number;
+      costUsdMicros: number;
     };
     const userMap = new Map<string, Row>();
     const row = (id: string): Row => {
@@ -51,6 +54,7 @@ export class TokenFlushProcessor {
           paidTokensUsed: 0,
           requestsCount: 0,
           costRial: 0,
+          costUsdMicros: 0,
         });
       return userMap.get(id)!;
     };
@@ -59,11 +63,13 @@ export class TokenFlushProcessor {
     //              token:dailypaid:{userId}:{date}
     //              token:req:{userId}:{date}
     //              cost:daily:{userId}:{date}
-    // userId is always at index 2
+    //              cost_usd:daily:{userId}:{date}
+    // userId is always the second-to-last colon segment
     const o1 = 0;
     const o2 = freeKeys.length;
     const o3 = o2 + dpKeys.length;
     const o4 = o3 + reqKeys.length;
+    const o5 = o4 + costKeys.length;
 
     freeKeys.forEach((k, i) => {
       row(k.split(':')[2]).freeTokensUsed = Number(values[o1 + i]) || 0;
@@ -76,6 +82,9 @@ export class TokenFlushProcessor {
     });
     costKeys.forEach((k, i) => {
       row(k.split(':')[2]).costRial = Number(values[o4 + i]) || 0;
+    });
+    costUsdKeys.forEach((k, i) => {
+      row(k.split(':')[2]).costUsdMicros = Number(values[o5 + i]) || 0;
     });
 
     await Promise.all(

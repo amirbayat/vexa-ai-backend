@@ -17,6 +17,7 @@ import { TicketsModule } from './modules/tickets/tickets.module'
 import { SalesModule } from './modules/sales/sales.module'
 import { ModelRouterModule } from './modules/model-router/model-router.module'
 import { MessageFeedbackModule } from './modules/message-feedback/message-feedback.module'
+import { UsageAnalyticsModule } from './modules/usage-analytics/usage-analytics.module'
 import { QueueModule } from './queue/queue.module'
 
 @Module({
@@ -39,6 +40,7 @@ import { QueueModule } from './queue/queue.module'
     SalesModule,
     ModelRouterModule,
     MessageFeedbackModule,
+    UsageAnalyticsModule,
   ],
 })
 export class AppModule {}

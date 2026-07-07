@@ -222,8 +222,8 @@ COMPLEX: استدلال چندمرحله‌ای، کد/معماری پیچیده
                 messages: [{ role: 'user', content: content.slice(0, 2000) }],
             });
             if (usage) {
-                const costRial = await this.pricingService.calcCostRial(usage.inputTokens ?? 0, usage.outputTokens ?? 0, modelId);
-                this.pricingService.trackCost(userId, costRial).catch(() => { });
+                const { costRial, costUsdMicros } = await this.pricingService.calcCost(usage.inputTokens ?? 0, usage.outputTokens ?? 0, modelId);
+                this.pricingService.trackCost(userId, costRial, costUsdMicros).catch(() => { });
             }
             return { tier: client_1.ModelTier[object.tier], confidence: 0.75 };
         }

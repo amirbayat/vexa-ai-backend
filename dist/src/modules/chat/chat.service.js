@@ -20,6 +20,8 @@ const token_service_1 = require("../usage/token.service");
 const pricing_service_1 = require("../usage/pricing.service");
 const token_estimator_service_1 = require("../usage/token-estimator.service");
 const model_router_service_1 = require("../model-router/model-router.service");
+const usage_analytics_service_1 = require("../usage-analytics/usage-analytics.service");
+const topic_service_1 = require("../usage-analytics/topic.service");
 const fa_1 = require("../../i18n/fa");
 const OPTIMAL_MODE = 'optimal';
 const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-4o-mini';
@@ -38,15 +40,19 @@ let ChatService = class ChatService {
     pricingService;
     tokenEstimator;
     modelRouter;
+    usageAnalytics;
+    topicService;
     config;
     provider;
-    constructor(prisma, redis, tokenService, pricingService, tokenEstimator, modelRouter, config) {
+    constructor(prisma, redis, tokenService, pricingService, tokenEstimator, modelRouter, usageAnalytics, topicService, config) {
         this.prisma = prisma;
         this.redis = redis;
         this.tokenService = tokenService;
         this.pricingService = pricingService;
         this.tokenEstimator = tokenEstimator;
         this.modelRouter = modelRouter;
+        this.usageAnalytics = usageAnalytics;
+        this.topicService = topicService;
         this.config = config;
         this.provider = (0, openai_compatible_1.createOpenAICompatible)({
             name: 'liara',
@@ -85,6 +91,7 @@ let ChatService = class ChatService {
         let messageStage = 'normal';
         if (N !== null) {
             if (todayCount >= N + M) {
+                this.usageAnalytics.logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED').catch(() => { });
                 throw new common_1.HttpException({
                     message: fa_1.fa.chat.dailyBlocked,
                     planTier: plan.planTier,
@@ -101,9 +108,18 @@ let ChatService = class ChatService {
         }
         const estimatedInput = await this.tokenEstimator.estimateTokens(dto.content, PRE_ROUTING_REFERENCE_MODEL);
         if (estimatedInput > effectiveInputLimit) {
+            this.usageAnalytics.logLimitHit(userId, 'INPUT_TOO_LONG').catch(() => { });
             throw new common_1.BadRequestException(fa_1.fa.chat.inputTooLong(effectiveInputLimit));
         }
-        const { cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier);
+        let cascadeModel;
+        try {
+            ;
+            ({ cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier));
+        }
+        catch (err) {
+            this.usageAnalytics.logLimitHit(userId, 'BUDGET_EXCEEDED').catch(() => { });
+            throw err;
+        }
         const allowed = plan.allowedModels;
         if (allowed.length === 0)
             throw new common_1.ForbiddenException(fa_1.fa.chat.modelNotAllowed);
@@ -166,11 +182,14 @@ let ChatService = class ChatService {
             res.write(`data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`);
         }
         try {
+            const topicId = await this.topicService.classify(dto.content);
             await this.prisma.message.create({
                 data: {
                     conversationId,
+                    userId,
                     role: 'USER',
                     content: dto.content,
+                    ...(topicId ? { topicId } : {}),
                     ...(dto.images?.length ? { images: dto.images } : {}),
                 },
             });
@@ -235,20 +254,23 @@ let ChatService = class ChatService {
             }
             const usage = await result.usage;
             const tokensUsed = usage.totalTokens ?? 0;
-            const costRial = await this.pricingService.calcCostRial(usage.inputTokens ?? 0, usage.outputTokens ?? 0, modelId);
+            const { costRial, costUsdMicros } = await this.pricingService.calcCost(usage.inputTokens ?? 0, usage.outputTokens ?? 0, modelId);
             await this.prisma.message.create({
                 data: {
                     conversationId,
+                    userId,
                     role: 'ASSISTANT',
                     content: fullContent,
                     tokensInput: usage.inputTokens ?? 0,
                     tokensOutput: usage.outputTokens ?? 0,
+                    costRial,
+                    costUsdMicros,
                     model: modelId,
                 },
             });
             await Promise.all([
                 this.tokenService.increment(userId, tokensUsed, quota.source),
-                this.pricingService.trackCost(userId, costRial),
+                this.pricingService.trackCost(userId, costRial, costUsdMicros),
                 this.prisma.conversation.update({
                     where: { id: conversationId },
                     data: {
@@ -299,6 +321,8 @@ exports.ChatService = ChatService = __decorate([
         pricing_service_1.PricingService,
         token_estimator_service_1.TokenEstimatorService,
         model_router_service_1.ModelRouterService,
+        usage_analytics_service_1.UsageAnalyticsService,
+        topic_service_1.TopicService,
         config_1.ConfigService])
 ], ChatService);
 //# sourceMappingURL=chat.service.js.map

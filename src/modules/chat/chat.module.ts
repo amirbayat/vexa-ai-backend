@@ -4,9 +4,10 @@ import { ChatController } from './chat.controller'
 import { UsageModule } from '../usage/usage.module'
 import { RedisModule } from '../../redis/redis.module'
 import { ModelRouterModule } from '../model-router/model-router.module'
+import { UsageAnalyticsModule } from '../usage-analytics/usage-analytics.module'
 
 @Module({
-  imports: [UsageModule, RedisModule, ModelRouterModule],
+  imports: [UsageModule, RedisModule, ModelRouterModule, UsageAnalyticsModule],
   controllers: [ChatController],
   providers: [ChatService],
 })

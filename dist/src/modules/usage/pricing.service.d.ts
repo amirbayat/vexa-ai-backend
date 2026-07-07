@@ -16,6 +16,10 @@ export interface BudgetStatus {
     upsellSuggestion: string | null;
     usdtRial: number;
 }
+export interface CostCalc {
+    costRial: number;
+    costUsdMicros: number;
+}
 export declare class PricingService {
     private readonly config;
     private readonly prisma;
@@ -29,11 +33,11 @@ export declare class PricingService {
     private readonly freeBudgetRial;
     private readonly walletMarkup;
     constructor(config: ConfigService, prisma: PrismaService, redis: RedisService, exchangeRate: ExchangeRateService, modelRegistry: AiModelRegistryService);
-    calcCostRial(inputTokens: number, outputTokens: number, modelId: string): Promise<number>;
+    calcCost(inputTokens: number, outputTokens: number, modelId: string): Promise<CostCalc>;
     dailyBudgetRial(priceMonthly: number): Promise<number>;
     monthlyBudgetRial(priceMonthly: number): Promise<number>;
     walletCostForRial(baseRial: number): number;
-    trackCost(userId: string, costRial: number): Promise<void>;
+    trackCost(userId: string, costRial: number, costUsdMicros?: number): Promise<void>;
     getSpentToday(userId: string): Promise<number>;
     getSpentMonth(userId: string): Promise<number>;
     getBudgetStatus(userId: string, priceMonthly: number, planTier: string): Promise<BudgetStatus>;
