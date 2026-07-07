@@ -1,7 +1,62 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { plainToInstance } from 'class-transformer'
+import { validate } from 'class-validator'
+import * as XLSX from 'xlsx'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { fa } from '../../i18n/fa'
+import { CreateModelDto, MODEL_TIERS, TOKENIZER_FAMILIES } from './dto/create-model.dto'
+import { UpdateModelDto } from './dto/update-model.dto'
+
+const MODEL_IMPORT_COLUMNS = [
+  'name',
+  'displayName',
+  'provider',
+  'inputPricePerM',
+  'outputPricePerM',
+  'supportsVision',
+  'isActive',
+  'sortOrder',
+  'tier',
+  'tokenizerFamily',
+  'avgCharsPerToken',
+] as const
+
+function cellToString(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  return String(value).trim()
+}
+
+function cellToNumber(value: unknown): number | undefined {
+  const s = cellToString(value)
+  if (s === undefined) return undefined
+  const n = Number(s)
+  return Number.isNaN(n) ? undefined : n
+}
+
+function cellToBoolean(value: unknown, fallback: boolean): boolean {
+  const s = cellToString(value)?.toLowerCase()
+  if (s === undefined) return fallback
+  if (['true', '1', 'yes', 'بله', 'فعال'].includes(s)) return true
+  if (['false', '0', 'no', 'خیر', 'غیرفعال'].includes(s)) return false
+  return fallback
+}
+
+function parseModelRow(raw: Record<string, unknown>) {
+  return {
+    name: cellToString(raw.name),
+    displayName: cellToString(raw.displayName),
+    provider: cellToString(raw.provider),
+    inputPricePerM: cellToNumber(raw.inputPricePerM),
+    outputPricePerM: cellToNumber(raw.outputPricePerM),
+    supportsVision: cellToBoolean(raw.supportsVision, false),
+    isActive: cellToBoolean(raw.isActive, true),
+    sortOrder: cellToNumber(raw.sortOrder) ?? 0,
+    tier: (cellToString(raw.tier)?.toUpperCase() as (typeof MODEL_TIERS)[number] | undefined) ?? undefined,
+    tokenizerFamily: cellToString(raw.tokenizerFamily) as (typeof TOKENIZER_FAMILIES)[number] | undefined,
+    avgCharsPerToken: cellToNumber(raw.avgCharsPerToken),
+  }
+}
 
 type LimitType = 'daily' | '1h' | '3h' | '6h'
 
@@ -322,31 +377,11 @@ export class AdminService {
     return this.prisma.aiModel.findMany({ orderBy: { sortOrder: 'asc' } })
   }
 
-  createModel(dto: {
-    name: string
-    displayName: string
-    provider: string
-    inputPricePerM: number
-    outputPricePerM: number
-    supportsVision: boolean
-    isActive: boolean
-    sortOrder: number
-    tier?: 'SIMPLE' | 'MEDIUM' | 'COMPLEX'
-  }) {
+  createModel(dto: CreateModelDto) {
     return this.prisma.aiModel.create({ data: dto })
   }
 
-  async updateModel(id: string, dto: Partial<{
-    name: string
-    displayName: string
-    provider: string
-    inputPricePerM: number
-    outputPricePerM: number
-    supportsVision: boolean
-    isActive: boolean
-    sortOrder: number
-    tier: 'SIMPLE' | 'MEDIUM' | 'COMPLEX'
-  }>) {
+  async updateModel(id: string, dto: UpdateModelDto) {
     const model = await this.prisma.aiModel.findUnique({ where: { id } })
     if (!model) throw new NotFoundException('مدل یافت نشد')
     return this.prisma.aiModel.update({ where: { id }, data: dto })
@@ -357,5 +392,61 @@ export class AdminService {
     if (!model) throw new NotFoundException('مدل یافت نشد')
     await this.prisma.aiModel.delete({ where: { id } })
     return { message: 'مدل حذف شد' }
+  }
+
+  async importModels(buffer: Buffer) {
+    let workbook: XLSX.WorkBook
+    try {
+      workbook = XLSX.read(buffer, { type: 'buffer' })
+    } catch {
+      throw new BadRequestException('فایل اکسل قابل خواندن نیست')
+    }
+
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
+    if (rows.length === 0) throw new BadRequestException('فایل اکسل خالی است')
+
+    const hasKnownColumn = Object.keys(rows[0]).some(
+      (key) => (MODEL_IMPORT_COLUMNS as readonly string[]).includes(key),
+    )
+    if (!hasKnownColumn) {
+      throw new BadRequestException(
+        `فرمت ستون‌های فایل اکسل شناخته نشد. ستون‌های مورد انتظار: ${MODEL_IMPORT_COLUMNS.join('، ')}`,
+      )
+    }
+
+    let created = 0
+    let updated = 0
+    const errors: Array<{ row: number; message: string }> = []
+
+    for (let i = 0; i < rows.length; i++) {
+      const rowNumber = i + 2 // ردیف ۱ هدر است
+      const data = parseModelRow(rows[i])
+
+      const instance = plainToInstance(CreateModelDto, data)
+      const violations = await validate(instance)
+      if (violations.length > 0) {
+        const message = violations
+          .map((v) => Object.values(v.constraints ?? {}).join('، '))
+          .join(' | ')
+        errors.push({ row: rowNumber, message })
+        continue
+      }
+
+      try {
+        const existing = await this.prisma.aiModel.findUnique({ where: { name: data.name } })
+        await this.prisma.aiModel.upsert({
+          where: { name: data.name as string },
+          create: data as CreateModelDto,
+          update: data,
+        })
+        if (existing) updated++
+        else created++
+      } catch {
+        errors.push({ row: rowNumber, message: 'خطا در ذخیره‌سازی این ردیف' })
+      }
+    }
+
+    return { total: rows.length, created, updated, errors }
   }
 }

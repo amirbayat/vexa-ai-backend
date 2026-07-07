@@ -14,11 +14,14 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AdminController = void 0;
 const common_1 = require("@nestjs/common");
+const platform_express_1 = require("@nestjs/platform-express");
 const jwt_guard_1 = require("../../common/guards/jwt.guard");
 const admin_guard_1 = require("../../common/guards/admin.guard");
 const admin_service_1 = require("./admin.service");
 const tickets_service_1 = require("../tickets/tickets.service");
 const update_ticket_status_dto_1 = require("../tickets/dto/update-ticket-status.dto");
+const create_model_dto_1 = require("./dto/create-model.dto");
+const update_model_dto_1 = require("./dto/update-model.dto");
 let AdminController = class AdminController {
     adminService;
     ticketsService;
@@ -82,6 +85,14 @@ let AdminController = class AdminController {
     }
     deleteModel(id) {
         return this.adminService.deleteModel(id);
+    }
+    importModels(file) {
+        if (!file)
+            throw new common_1.BadRequestException('فایلی ارسال نشده');
+        if (!/\.(xlsx|xls)$/i.test(file.originalname)) {
+            throw new common_1.BadRequestException('فقط فایل اکسل (.xlsx یا .xls) پذیرفته می‌شود');
+        }
+        return this.adminService.importModels(file.buffer);
     }
 };
 exports.AdminController = AdminController;
@@ -203,7 +214,7 @@ __decorate([
     (0, common_1.Post)('models'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [create_model_dto_1.CreateModelDto]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "createModel", null);
 __decorate([
@@ -211,7 +222,7 @@ __decorate([
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [String, update_model_dto_1.UpdateModelDto]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "updateModel", null);
 __decorate([
@@ -221,6 +232,14 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "deleteModel", null);
+__decorate([
+    (0, common_1.Post)('models/import'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', { limits: { fileSize: 5 * 1024 * 1024 } })),
+    __param(0, (0, common_1.UploadedFile)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "importModels", null);
 exports.AdminController = AdminController = __decorate([
     (0, common_1.Controller)('admin'),
     (0, common_1.UseGuards)(jwt_guard_1.JwtGuard, admin_guard_1.AdminGuard),

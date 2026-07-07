@@ -1,6 +1,8 @@
 import { AdminService } from './admin.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { UpdateTicketStatusDto } from '../tickets/dto/update-ticket-status.dto';
+import { CreateModelDto } from './dto/create-model.dto';
+import { UpdateModelDto } from './dto/update-model.dto';
 export declare class AdminController {
     private readonly adminService;
     private readonly ticketsService;
@@ -204,17 +206,7 @@ export declare class AdminController {
         tokenizerFamily: string;
         avgCharsPerToken: number;
     }[]>;
-    createModel(body: {
-        name: string;
-        displayName: string;
-        provider: string;
-        inputPricePerM: number;
-        outputPricePerM: number;
-        supportsVision: boolean;
-        isActive: boolean;
-        sortOrder: number;
-        tier?: 'SIMPLE' | 'MEDIUM' | 'COMPLEX';
-    }): import("@prisma/client").Prisma.Prisma__AiModelClient<{
+    createModel(body: CreateModelDto): import("@prisma/client").Prisma.Prisma__AiModelClient<{
         name: string;
         id: string;
         createdAt: Date;
@@ -229,7 +221,7 @@ export declare class AdminController {
         tokenizerFamily: string;
         avgCharsPerToken: number;
     }, never, import("@prisma/client/runtime/client").DefaultArgs, import("@prisma/client").Prisma.PrismaClientOptions>;
-    updateModel(id: string, body: object): Promise<{
+    updateModel(id: string, body: UpdateModelDto): Promise<{
         name: string;
         id: string;
         createdAt: Date;
@@ -246,5 +238,14 @@ export declare class AdminController {
     }>;
     deleteModel(id: string): Promise<{
         message: string;
+    }>;
+    importModels(file: Express.Multer.File): Promise<{
+        total: number;
+        created: number;
+        updated: number;
+        errors: {
+            row: number;
+            message: string;
+        }[];
     }>;
 }

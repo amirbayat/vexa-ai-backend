@@ -1,5 +1,7 @@
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
+import { CreateModelDto } from './dto/create-model.dto';
+import { UpdateModelDto } from './dto/update-model.dto';
 type LimitType = 'daily' | '1h' | '3h' | '6h';
 export declare class AdminService {
     private readonly prisma;
@@ -121,17 +123,7 @@ export declare class AdminService {
         tokenizerFamily: string;
         avgCharsPerToken: number;
     }[]>;
-    createModel(dto: {
-        name: string;
-        displayName: string;
-        provider: string;
-        inputPricePerM: number;
-        outputPricePerM: number;
-        supportsVision: boolean;
-        isActive: boolean;
-        sortOrder: number;
-        tier?: 'SIMPLE' | 'MEDIUM' | 'COMPLEX';
-    }): import("@prisma/client").Prisma.Prisma__AiModelClient<{
+    createModel(dto: CreateModelDto): import("@prisma/client").Prisma.Prisma__AiModelClient<{
         name: string;
         id: string;
         createdAt: Date;
@@ -146,17 +138,7 @@ export declare class AdminService {
         tokenizerFamily: string;
         avgCharsPerToken: number;
     }, never, import("@prisma/client/runtime/client").DefaultArgs, import("@prisma/client").Prisma.PrismaClientOptions>;
-    updateModel(id: string, dto: Partial<{
-        name: string;
-        displayName: string;
-        provider: string;
-        inputPricePerM: number;
-        outputPricePerM: number;
-        supportsVision: boolean;
-        isActive: boolean;
-        sortOrder: number;
-        tier: 'SIMPLE' | 'MEDIUM' | 'COMPLEX';
-    }>): Promise<{
+    updateModel(id: string, dto: UpdateModelDto): Promise<{
         name: string;
         id: string;
         createdAt: Date;
@@ -173,6 +155,15 @@ export declare class AdminService {
     }>;
     deleteModel(id: string): Promise<{
         message: string;
+    }>;
+    importModels(buffer: Buffer): Promise<{
+        total: number;
+        created: number;
+        updated: number;
+        errors: {
+            row: number;
+            message: string;
+        }[];
     }>;
 }
 export {};

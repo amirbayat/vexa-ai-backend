@@ -1,19 +1,106 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
 var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
     var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
     if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AdminService = void 0;
 const common_1 = require("@nestjs/common");
+const class_transformer_1 = require("class-transformer");
+const class_validator_1 = require("class-validator");
+const XLSX = __importStar(require("xlsx"));
 const prisma_service_1 = require("../../prisma/prisma.service");
 const redis_service_1 = require("../../redis/redis.service");
 const fa_1 = require("../../i18n/fa");
+const create_model_dto_1 = require("./dto/create-model.dto");
+const MODEL_IMPORT_COLUMNS = [
+    'name',
+    'displayName',
+    'provider',
+    'inputPricePerM',
+    'outputPricePerM',
+    'supportsVision',
+    'isActive',
+    'sortOrder',
+    'tier',
+    'tokenizerFamily',
+    'avgCharsPerToken',
+];
+function cellToString(value) {
+    if (value === undefined || value === null || value === '')
+        return undefined;
+    return String(value).trim();
+}
+function cellToNumber(value) {
+    const s = cellToString(value);
+    if (s === undefined)
+        return undefined;
+    const n = Number(s);
+    return Number.isNaN(n) ? undefined : n;
+}
+function cellToBoolean(value, fallback) {
+    const s = cellToString(value)?.toLowerCase();
+    if (s === undefined)
+        return fallback;
+    if (['true', '1', 'yes', 'بله', 'فعال'].includes(s))
+        return true;
+    if (['false', '0', 'no', 'خیر', 'غیرفعال'].includes(s))
+        return false;
+    return fallback;
+}
+function parseModelRow(raw) {
+    return {
+        name: cellToString(raw.name),
+        displayName: cellToString(raw.displayName),
+        provider: cellToString(raw.provider),
+        inputPricePerM: cellToNumber(raw.inputPricePerM),
+        outputPricePerM: cellToNumber(raw.outputPricePerM),
+        supportsVision: cellToBoolean(raw.supportsVision, false),
+        isActive: cellToBoolean(raw.isActive, true),
+        sortOrder: cellToNumber(raw.sortOrder) ?? 0,
+        tier: cellToString(raw.tier)?.toUpperCase() ?? undefined,
+        tokenizerFamily: cellToString(raw.tokenizerFamily),
+        avgCharsPerToken: cellToNumber(raw.avgCharsPerToken),
+    };
+}
 const LIMIT_TTL = {
     '1h': 3_600,
     '3h': 10_800,
@@ -297,6 +384,55 @@ let AdminService = class AdminService {
             throw new common_1.NotFoundException('مدل یافت نشد');
         await this.prisma.aiModel.delete({ where: { id } });
         return { message: 'مدل حذف شد' };
+    }
+    async importModels(buffer) {
+        let workbook;
+        try {
+            workbook = XLSX.read(buffer, { type: 'buffer' });
+        }
+        catch {
+            throw new common_1.BadRequestException('فایل اکسل قابل خواندن نیست');
+        }
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        if (rows.length === 0)
+            throw new common_1.BadRequestException('فایل اکسل خالی است');
+        const hasKnownColumn = Object.keys(rows[0]).some((key) => MODEL_IMPORT_COLUMNS.includes(key));
+        if (!hasKnownColumn) {
+            throw new common_1.BadRequestException(`فرمت ستون‌های فایل اکسل شناخته نشد. ستون‌های مورد انتظار: ${MODEL_IMPORT_COLUMNS.join('، ')}`);
+        }
+        let created = 0;
+        let updated = 0;
+        const errors = [];
+        for (let i = 0; i < rows.length; i++) {
+            const rowNumber = i + 2;
+            const data = parseModelRow(rows[i]);
+            const instance = (0, class_transformer_1.plainToInstance)(create_model_dto_1.CreateModelDto, data);
+            const violations = await (0, class_validator_1.validate)(instance);
+            if (violations.length > 0) {
+                const message = violations
+                    .map((v) => Object.values(v.constraints ?? {}).join('، '))
+                    .join(' | ');
+                errors.push({ row: rowNumber, message });
+                continue;
+            }
+            try {
+                const existing = await this.prisma.aiModel.findUnique({ where: { name: data.name } });
+                await this.prisma.aiModel.upsert({
+                    where: { name: data.name },
+                    create: data,
+                    update: data,
+                });
+                if (existing)
+                    updated++;
+                else
+                    created++;
+            }
+            catch {
+                errors.push({ row: rowNumber, message: 'خطا در ذخیره‌سازی این ردیف' });
+            }
+        }
+        return { total: rows.length, created, updated, errors };
     }
 };
 exports.AdminService = AdminService;

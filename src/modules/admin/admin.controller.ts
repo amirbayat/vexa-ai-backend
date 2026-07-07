@@ -1,9 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
 import { JwtGuard } from '../../common/guards/jwt.guard'
 import { AdminGuard } from '../../common/guards/admin.guard'
 import { AdminService } from './admin.service'
 import { TicketsService } from '../tickets/tickets.service'
 import { UpdateTicketStatusDto } from '../tickets/dto/update-ticket-status.dto'
+import { CreateModelDto } from './dto/create-model.dto'
+import { UpdateModelDto } from './dto/update-model.dto'
 
 @Controller('admin')
 @UseGuards(JwtGuard, AdminGuard)
@@ -111,27 +114,27 @@ export class AdminController {
   }
 
   @Post('models')
-  createModel(@Body() body: {
-    name: string
-    displayName: string
-    provider: string
-    inputPricePerM: number
-    outputPricePerM: number
-    supportsVision: boolean
-    isActive: boolean
-    sortOrder: number
-    tier?: 'SIMPLE' | 'MEDIUM' | 'COMPLEX'
-  }) {
+  createModel(@Body() body: CreateModelDto) {
     return this.adminService.createModel(body)
   }
 
   @Patch('models/:id')
-  updateModel(@Param('id') id: string, @Body() body: object) {
+  updateModel(@Param('id') id: string, @Body() body: UpdateModelDto) {
     return this.adminService.updateModel(id, body)
   }
 
   @Delete('models/:id')
   deleteModel(@Param('id') id: string) {
     return this.adminService.deleteModel(id)
+  }
+
+  @Post('models/import')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  importModels(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('فایلی ارسال نشده')
+    if (!/\.(xlsx|xls)$/i.test(file.originalname)) {
+      throw new BadRequestException('فقط فایل اکسل (.xlsx یا .xls) پذیرفته می‌شود')
+    }
+    return this.adminService.importModels(file.buffer)
   }
 }
