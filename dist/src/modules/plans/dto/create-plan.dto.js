@@ -27,6 +27,8 @@ class CreatePlanDto {
     throttledMessageCount;
     throttledInputTokens;
     throttledOutputTokens;
+    rollingWindowLimit;
+    rollingWindowHours;
 }
 exports.CreatePlanDto = CreatePlanDto;
 __decorate([
@@ -103,4 +105,16 @@ __decorate([
     (0, class_validator_1.Min)(1, { message: fa_1.fa.validation.numberPositive }),
     __metadata("design:type", Object)
 ], CreatePlanDto.prototype, "throttledOutputTokens", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)({ message: fa_1.fa.validation.mustBeNumber }),
+    (0, class_validator_1.Min)(1, { message: fa_1.fa.validation.numberPositive }),
+    __metadata("design:type", Object)
+], CreatePlanDto.prototype, "rollingWindowLimit", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)({ message: fa_1.fa.validation.mustBeNumber }),
+    (0, class_validator_1.Min)(1, { message: fa_1.fa.validation.numberPositive }),
+    __metadata("design:type", Number)
+], CreatePlanDto.prototype, "rollingWindowHours", void 0);
 //# sourceMappingURL=create-plan.dto.js.map

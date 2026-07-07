@@ -18,6 +18,8 @@ const plans = [
     },
     isActive: true,
     sortOrder: 0,
+    rollingWindowLimit: 5,
+    rollingWindowHours: 3,
   },
   {
     name: 'نقره‌ای',
@@ -33,6 +35,8 @@ const plans = [
     },
     isActive: true,
     sortOrder: 1,
+    rollingWindowLimit: 10,
+    rollingWindowHours: 3,
   },
   {
     name: 'طلایی',
@@ -49,6 +53,8 @@ const plans = [
     },
     isActive: true,
     sortOrder: 2,
+    rollingWindowLimit: 20,
+    rollingWindowHours: 3,
   },
 ]
 

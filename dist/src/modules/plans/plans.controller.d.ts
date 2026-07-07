@@ -20,6 +20,8 @@ export declare class PlansController {
         throttledMessageCount: number | null;
         throttledInputTokens: number | null;
         throttledOutputTokens: number | null;
+        rollingWindowLimit: number | null;
+        rollingWindowHours: number;
     }[]>;
     findAllAdmin(): import("@prisma/client").Prisma.PrismaPromise<{
         name: string;
@@ -37,6 +39,8 @@ export declare class PlansController {
         throttledMessageCount: number | null;
         throttledInputTokens: number | null;
         throttledOutputTokens: number | null;
+        rollingWindowLimit: number | null;
+        rollingWindowHours: number;
     }[]>;
     findOne(id: string): Promise<{
         name: string;
@@ -54,6 +58,8 @@ export declare class PlansController {
         throttledMessageCount: number | null;
         throttledInputTokens: number | null;
         throttledOutputTokens: number | null;
+        rollingWindowLimit: number | null;
+        rollingWindowHours: number;
     }>;
     create(dto: CreatePlanDto): Promise<{
         message: "پلن با موفقیت ایجاد شد";
@@ -73,6 +79,8 @@ export declare class PlansController {
             throttledMessageCount: number | null;
             throttledInputTokens: number | null;
             throttledOutputTokens: number | null;
+            rollingWindowLimit: number | null;
+            rollingWindowHours: number;
         };
     }>;
     update(id: string, dto: UpdatePlanDto): Promise<{
@@ -93,6 +101,8 @@ export declare class PlansController {
             throttledMessageCount: number | null;
             throttledInputTokens: number | null;
             throttledOutputTokens: number | null;
+            rollingWindowLimit: number | null;
+            rollingWindowHours: number;
         };
     }>;
     remove(id: string): Promise<{

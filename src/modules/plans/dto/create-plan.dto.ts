@@ -61,4 +61,14 @@ export class CreatePlanDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
   throttledOutputTokens?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  rollingWindowLimit?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  rollingWindowHours?: number
 }

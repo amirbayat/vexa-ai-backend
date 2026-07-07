@@ -39,6 +39,7 @@ export declare const fa: {
         readonly dailyMessageLimitExceeded: "به سقف پیام روزانه رسیدید";
         readonly dailyBlocked: "امروز به محدودیت کامل رسیدید. فردا دوباره می‌توانید ارسال کنید";
         readonly throttledNotice: "پیام‌های باقی‌مانده امروز با محدودیت توکن ارسال می‌شوند";
+        readonly rollingWindowBlocked: (hours: number) => string;
     };
     readonly payment: {
         readonly pending: "در انتظار پرداخت";

@@ -42,6 +42,7 @@ exports.fa = {
         dailyMessageLimitExceeded: 'به سقف پیام روزانه رسیدید',
         dailyBlocked: 'امروز به محدودیت کامل رسیدید. فردا دوباره می‌توانید ارسال کنید',
         throttledNotice: 'پیام‌های باقی‌مانده امروز با محدودیت توکن ارسال می‌شوند',
+        rollingWindowBlocked: (hours) => `تعداد پیام‌های شما در ${hours} ساعت اخیر به سقف مجاز رسیده. کمی صبر کنید`,
     },
     payment: {
         pending: 'در انتظار پرداخت',

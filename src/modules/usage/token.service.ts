@@ -28,6 +28,8 @@ export interface PlanLimits {
   throttledMessageCount: number | null
   throttledInputTokens: number | null
   throttledOutputTokens: number | null
+  rollingWindowLimit: number | null
+  rollingWindowHours: number
 }
 
 // Iran Standard Time = UTC+3:30 (no DST)
@@ -213,6 +215,8 @@ export class TokenService {
         throttledMessageCount: sub.plan.throttledMessageCount ?? null,
         throttledInputTokens: sub.plan.throttledInputTokens ?? null,
         throttledOutputTokens: sub.plan.throttledOutputTokens ?? null,
+        rollingWindowLimit: sub.plan.rollingWindowLimit ?? null,
+        rollingWindowHours: sub.plan.rollingWindowHours,
       }
     } else {
       // no subscription → look up the active free plan from DB instead of hardcoded defaults
@@ -233,6 +237,8 @@ export class TokenService {
         throttledMessageCount: freePlan?.throttledMessageCount ?? null,
         throttledInputTokens: freePlan?.throttledInputTokens ?? null,
         throttledOutputTokens: freePlan?.throttledOutputTokens ?? null,
+        rollingWindowLimit: freePlan?.rollingWindowLimit ?? null,
+        rollingWindowHours: freePlan?.rollingWindowHours ?? 3,
       }
     }
 

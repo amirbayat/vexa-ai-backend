@@ -19,6 +19,8 @@ export declare class SubscriptionsService {
             throttledMessageCount: number | null;
             throttledInputTokens: number | null;
             throttledOutputTokens: number | null;
+            rollingWindowLimit: number | null;
+            rollingWindowHours: number;
         };
     } & {
         id: string;

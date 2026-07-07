@@ -23,6 +23,8 @@ export declare class PlansService {
         throttledMessageCount: number | null;
         throttledInputTokens: number | null;
         throttledOutputTokens: number | null;
+        rollingWindowLimit: number | null;
+        rollingWindowHours: number;
     }[]>;
     findAllAdmin(): Prisma.PrismaPromise<{
         name: string;
@@ -40,6 +42,8 @@ export declare class PlansService {
         throttledMessageCount: number | null;
         throttledInputTokens: number | null;
         throttledOutputTokens: number | null;
+        rollingWindowLimit: number | null;
+        rollingWindowHours: number;
     }[]>;
     findOne(id: string): Promise<{
         name: string;
@@ -57,6 +61,8 @@ export declare class PlansService {
         throttledMessageCount: number | null;
         throttledInputTokens: number | null;
         throttledOutputTokens: number | null;
+        rollingWindowLimit: number | null;
+        rollingWindowHours: number;
     }>;
     create(dto: CreatePlanDto): Prisma.Prisma__PlanClient<{
         name: string;
@@ -74,6 +80,8 @@ export declare class PlansService {
         throttledMessageCount: number | null;
         throttledInputTokens: number | null;
         throttledOutputTokens: number | null;
+        rollingWindowLimit: number | null;
+        rollingWindowHours: number;
     }, never, import("@prisma/client/runtime/client").DefaultArgs, Prisma.PrismaClientOptions>;
     update(id: string, dto: UpdatePlanDto): Promise<{
         name: string;
@@ -91,6 +99,8 @@ export declare class PlansService {
         throttledMessageCount: number | null;
         throttledInputTokens: number | null;
         throttledOutputTokens: number | null;
+        rollingWindowLimit: number | null;
+        rollingWindowHours: number;
     }>;
     remove(id: string): Promise<{
         name: string;
@@ -108,5 +118,7 @@ export declare class PlansService {
         throttledMessageCount: number | null;
         throttledInputTokens: number | null;
         throttledOutputTokens: number | null;
+        rollingWindowLimit: number | null;
+        rollingWindowHours: number;
     }>;
 }

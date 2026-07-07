@@ -52,6 +52,8 @@ model Plan {
   throttledMessageCount Int?
   throttledInputTokens  Int?
   throttledOutputTokens Int?
+  rollingWindowLimit    Int? // سقف پیام در پنجره‌ی لغزان — null = غیرفعال برای این پلن (docs/PRD-global-budget-gateway.md بخش ۸)
+  rollingWindowHours    Int  @default(3)
 
   subscriptions Subscription[]
   payments      Payment[]

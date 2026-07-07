@@ -51,6 +51,8 @@ export class PlansService {
         ...(dto.throttledMessageCount !== undefined && { throttledMessageCount: dto.throttledMessageCount ?? null }),
         ...(dto.throttledInputTokens !== undefined && { throttledInputTokens: dto.throttledInputTokens ?? null }),
         ...(dto.throttledOutputTokens !== undefined && { throttledOutputTokens: dto.throttledOutputTokens ?? null }),
+        ...(dto.rollingWindowLimit !== undefined && { rollingWindowLimit: dto.rollingWindowLimit ?? null }),
+        ...(dto.rollingWindowHours !== undefined && { rollingWindowHours: dto.rollingWindowHours }),
       },
     })
   }

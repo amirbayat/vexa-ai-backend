@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import * as crypto from 'crypto'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { streamText, generateText } from 'ai'
 import type { ModelMessage, UserModelMessage } from 'ai'
@@ -137,6 +138,23 @@ export class ChatService {
       if (todayCount >= N) {
         // ── THROTTLED ──────────────────────────────────────────────────────
         messageStage = 'throttled'
+      }
+    }
+
+    // ── پنجره‌ی لغزان (rolling window) — بخش ۸ PRD-global-budget-gateway.md ──
+    // مکمل سقف روزانه‌ی بالا، نه جایگزین آن — هر دو باید هم‌زمان رعایت شوند.
+    // null یعنی این پلن اصلاً محدودیت پنجره‌ای ندارد.
+    const rollingWindowKey = `ratelimit:msg:${userId}`
+    if (plan.rollingWindowLimit !== null) {
+      const windowMs = plan.rollingWindowHours * 3_600_000
+      await this.redis.zremrangebyscore(rollingWindowKey, 0, Date.now() - windowMs)
+      const countInWindow = await this.redis.zcard(rollingWindowKey)
+      if (countInWindow >= plan.rollingWindowLimit) {
+        this.usageAnalytics.logLimitHit(userId, 'ROLLING_WINDOW_BLOCKED').catch(() => {})
+        throw new HttpException(
+          { message: fa.chat.rollingWindowBlocked(plan.rollingWindowHours), stage: 'rolling_window_blocked' },
+          429,
+        )
       }
     }
 
@@ -376,6 +394,11 @@ export class ChatService {
             lastMessageAt: new Date(),
           },
         }),
+        // فقط بعد از موفقیت شمرده می‌شود، نه در preflight — یک درخواست ردشده
+        // نباید سهمی از سقف پنجره‌ی لغزان مصرف کند
+        ...(plan.rollingWindowLimit !== null
+          ? [this.redis.zadd(rollingWindowKey, Date.now(), `${Date.now()}:${crypto.randomUUID()}`)]
+          : []),
       ])
 
       if (!conversation.title && isFirstMessage) {

@@ -173,6 +173,8 @@ let TokenService = class TokenService {
                 throttledMessageCount: sub.plan.throttledMessageCount ?? null,
                 throttledInputTokens: sub.plan.throttledInputTokens ?? null,
                 throttledOutputTokens: sub.plan.throttledOutputTokens ?? null,
+                rollingWindowLimit: sub.plan.rollingWindowLimit ?? null,
+                rollingWindowHours: sub.plan.rollingWindowHours,
             };
         }
         else {
@@ -193,6 +195,8 @@ let TokenService = class TokenService {
                 throttledMessageCount: freePlan?.throttledMessageCount ?? null,
                 throttledInputTokens: freePlan?.throttledInputTokens ?? null,
                 throttledOutputTokens: freePlan?.throttledOutputTokens ?? null,
+                rollingWindowLimit: freePlan?.rollingWindowLimit ?? null,
+                rollingWindowHours: freePlan?.rollingWindowHours ?? 3,
             };
         }
         await this.redis.set(planCacheKey(userId), JSON.stringify(limits), 'EX', 3600);

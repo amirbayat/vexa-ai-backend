@@ -16,4 +16,6 @@ export declare class CreatePlanDto {
     throttledMessageCount?: number | null;
     throttledInputTokens?: number | null;
     throttledOutputTokens?: number | null;
+    rollingWindowLimit?: number | null;
+    rollingWindowHours?: number;
 }

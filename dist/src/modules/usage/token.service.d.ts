@@ -23,6 +23,8 @@ export interface PlanLimits {
     throttledMessageCount: number | null;
     throttledInputTokens: number | null;
     throttledOutputTokens: number | null;
+    rollingWindowLimit: number | null;
+    rollingWindowHours: number;
 }
 export declare class TokenService {
     private readonly redis;
