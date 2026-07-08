@@ -18,6 +18,12 @@ const OTP_RATE_WINDOW = 600 // 10 min
 const OTP_ATTEMPT_LIMIT = 5
 const OTP_ATTEMPT_WINDOW = 1800 // 30 min
 
+// حساب تستی ثابت — بدون ارسال پیامک واقعی، بدون rate limit
+// فقط وقتی env variable به نام TEST_USER برابر 'true' باشد فعال است (پیش‌فرض: غیرفعال)
+const TEST_PHONE = '09001111111'
+const TEST_OTP_CODE = '123654'
+const TEST_USER_NAME = 'تست'
+
 function normalizePhone(phone: string): string {
   return phone.replace(/^\+98/, '0').replace(/^98/, '0')
 }
@@ -37,8 +43,16 @@ export class AuthService {
     private readonly campaign: CampaignService,
   ) {}
 
+  private isTestUserEnabled(): boolean {
+    return this.config.get<string>('TEST_USER', 'false') === 'true'
+  }
+
   async sendOtp(rawPhone: string): Promise<{ message: string }> {
     const phone = normalizePhone(rawPhone)
+
+    if (phone === TEST_PHONE && this.isTestUserEnabled()) {
+      return { message: fa.auth.otpSent }
+    }
 
     // rate limit: max 3 sends / 10min
     const rateKey = otpRateKey(phone)
@@ -58,32 +72,40 @@ export class AuthService {
 
   async verifyOtp(rawPhone: string, code: string) {
     const phone = normalizePhone(rawPhone)
+    const isTestPhone = phone === TEST_PHONE && this.isTestUserEnabled()
 
-    // attempt limit: 5 / 30min
-    const attemptKey = otpAttemptKey(phone)
-    const attempts = await this.redis.incr(attemptKey)
-    if (attempts === 1) await this.redis.expire(attemptKey, OTP_ATTEMPT_WINDOW)
-    if (attempts > OTP_ATTEMPT_LIMIT) {
-      throw new HttpException(fa.auth.otpTooManyAttempts, 429)
+    if (isTestPhone) {
+      if (code !== TEST_OTP_CODE) throw new UnauthorizedException(fa.auth.otpInvalid)
+    } else {
+      // attempt limit: 5 / 30min
+      const attemptKey = otpAttemptKey(phone)
+      const attempts = await this.redis.incr(attemptKey)
+      if (attempts === 1) await this.redis.expire(attemptKey, OTP_ATTEMPT_WINDOW)
+      if (attempts > OTP_ATTEMPT_LIMIT) {
+        throw new HttpException(fa.auth.otpTooManyAttempts, 429)
+      }
+
+      const stored = await this.redis.get(otpKey(phone))
+      if (!stored) throw new UnauthorizedException(fa.auth.otpExpired)
+      if (stored !== code) throw new UnauthorizedException(fa.auth.otpInvalid)
+
+      // clear otp + counters after success
+      await this.redis.del(otpKey(phone), otpRateKey(phone), attemptKey)
     }
-
-    const stored = await this.redis.get(otpKey(phone))
-    if (!stored) throw new UnauthorizedException(fa.auth.otpExpired)
-    if (stored !== code) throw new UnauthorizedException(fa.auth.otpInvalid)
-
-    // clear otp + counters after success
-    await this.redis.del(otpKey(phone), otpRateKey(phone), attemptKey)
 
     // upsert نمی‌تواند بگوید رکورد جدید ساخته شد یا از قبل بود — برای گیت کمپین
     // سافت‌لانچ (فقط روی اولین ثبت‌نام) باید صریح جدا شود
     const existing = await this.prisma.user.findUnique({ where: { phone } })
-    const user = existing ?? (await this.prisma.user.create({ data: { phone } }))
+    const user = existing ?? (await this.prisma.user.create({
+      data: { phone, ...(isTestPhone ? { name: TEST_USER_NAME } : {}) },
+    }))
     const isNewUser = !existing
 
     if (!user.isActive) throw new UnauthorizedException(fa.auth.userDisabled)
 
+    // حساب تستی هیچ‌وقت پشت گیت waitlist سافت‌لانچ گیر نمی‌افتد
     let waitlisted: { message: string; queuePosition: number } | null = null
-    if (isNewUser) {
+    if (isNewUser && !isTestPhone) {
       waitlisted = await this.campaign.applyToNewUser(user.id, user.phone)
     }
 
