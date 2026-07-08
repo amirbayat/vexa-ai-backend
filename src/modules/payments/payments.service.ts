@@ -1,8 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { PaymentProvider } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { TokenService } from '../usage/token.service'
-import { ZarinpalService } from './zarinpal.service'
+import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry'
+import { PaymentGateway } from './gateways/payment-gateway.interface'
 import { fa } from '../../i18n/fa'
 import { InitiatePaymentDto } from './dto/initiate-payment.dto'
 
@@ -12,7 +14,7 @@ const SUBSCRIPTION_DAYS = 30
 export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly zarinpal: ZarinpalService,
+    private readonly registry: PaymentGatewayRegistry,
     private readonly tokenService: TokenService,
     private readonly config: ConfigService,
   ) {}
@@ -22,34 +24,50 @@ export class PaymentsService {
     if (!plan) throw new NotFoundException(fa.plans.notFound)
     if (!plan.isActive) throw new BadRequestException(fa.plans.notActive)
 
-    const callbackUrl = `${this.config.get('APP_URL')}/api/v1/payments/callback`
+    const gateway = this.registry.resolve(dto.gateway)
+    const callbackUrl = `${this.config.get('APP_URL')}/api/v1/payments/callback/${gateway.name.toLowerCase()}`
 
-    const { authority, paymentUrl } = await this.zarinpal.requestPayment(
-      plan.priceMonthly,
-      fa.payment.description(plan.name),
+    const { providerRef, paymentUrl } = await gateway.createPayment({
+      amount: plan.priceMonthly,
+      description: fa.payment.description(plan.name),
       callbackUrl,
-    )
-
-    await this.prisma.payment.create({
-      data: { userId, planId: dto.planId, amount: plan.priceMonthly, authority },
     })
 
-    return { paymentUrl, authority }
+    await this.prisma.payment.create({
+      data: { userId, planId: dto.planId, amount: plan.priceMonthly, provider: gateway.name, providerRef },
+    })
+
+    return { paymentUrl, providerRef }
   }
 
-  async verify(authority: string, status: string) {
+  getEnabledGateways() {
+    return this.registry.getEnabled().map((g) => g.toLowerCase())
+  }
+
+  async verifyCallback(providerName: string, query: Record<string, string>) {
+    const provider = providerName.toUpperCase() as PaymentProvider
+    if (!this.registry.getEnabled().includes(provider)) {
+      throw new NotFoundException()
+    }
+
+    const gateway = this.registry.byName(provider)
+    const { providerRef, success } = gateway.parseCallback(query)
+    return this.verify(gateway, providerRef, success)
+  }
+
+  private async verify(gateway: PaymentGateway, providerRef: string, callbackSuccess: boolean) {
     const appUrl = this.config.get<string>('APP_URL')
 
-    if (status !== 'OK') {
-      const payment = await this.prisma.payment.findUnique({ where: { authority } })
+    if (!callbackSuccess) {
+      const payment = await this.prisma.payment.findUnique({ where: { providerRef } })
       if (payment) {
-        await this.prisma.payment.update({ where: { authority }, data: { status: 'FAILED' } })
+        await this.prisma.payment.update({ where: { providerRef }, data: { status: 'FAILED' } })
       }
       return { redirect: `${appUrl}/payment?status=failed` }
     }
 
     const payment = await this.prisma.payment.findUnique({
-      where: { authority },
+      where: { providerRef },
       include: { plan: true },
     })
 
@@ -59,19 +77,19 @@ export class PaymentsService {
     }
     if (payment.status !== 'PENDING') throw new BadRequestException(fa.payment.invalidStatus)
 
-    const { success, refId } = await this.zarinpal.verifyPayment(payment.amount, authority)
+    const { success, refId } = await gateway.verifyPayment({ amount: payment.amount, providerRef })
 
     if (!success) {
-      await this.prisma.payment.update({ where: { authority }, data: { status: 'FAILED' } })
+      await this.prisma.payment.update({ where: { providerRef }, data: { status: 'FAILED' } })
       return { redirect: `${appUrl}/payment?status=failed` }
     }
 
     const now = new Date()
     const periodEnd = new Date(now.getTime() + SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000)
 
-    await this.prisma.$transaction(async tx => {
+    await this.prisma.$transaction(async (tx) => {
       await tx.payment.update({
-        where: { authority },
+        where: { providerRef },
         data: { status: 'COMPLETED', refId: refId! },
       })
 

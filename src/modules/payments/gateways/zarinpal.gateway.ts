@@ -1,6 +1,15 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { fa } from '../../i18n/fa'
+import { PaymentProvider } from '@prisma/client'
+import { fa } from '../../../i18n/fa'
+import {
+  CallbackQuery,
+  CreatePaymentParams,
+  CreatePaymentResult,
+  PaymentGateway,
+  VerifyPaymentParams,
+  VerifyPaymentResult,
+} from './payment-gateway.interface'
 
 interface ZarinpalRequestResponse {
   data: { authority: string; fee: number; code: number }
@@ -13,7 +22,9 @@ interface ZarinpalVerifyResponse {
 }
 
 @Injectable()
-export class ZarinpalService {
+export class ZarinpalGateway implements PaymentGateway {
+  readonly name = PaymentProvider.ZARINPAL
+
   private readonly merchantId: string
   private readonly baseUrl = 'https://api.zarinpal.com/pg/v4/payment'
   private readonly gatewayUrl = 'https://www.zarinpal.com/pg/StartPay'
@@ -22,7 +33,7 @@ export class ZarinpalService {
     this.merchantId = this.config.get<string>('ZARINPAL_MERCHANT_ID')!
   }
 
-  async requestPayment(amount: number, description: string, callbackUrl: string) {
+  async createPayment({ amount, description, callbackUrl }: CreatePaymentParams): Promise<CreatePaymentResult> {
     const res = await fetch(`${this.baseUrl}/request.json`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -41,19 +52,19 @@ export class ZarinpalService {
     }
 
     return {
-      authority: json.data.authority,
+      providerRef: json.data.authority,
       paymentUrl: `${this.gatewayUrl}/${json.data.authority}`,
     }
   }
 
-  async verifyPayment(amount: number, authority: string) {
+  async verifyPayment({ amount, providerRef }: VerifyPaymentParams): Promise<VerifyPaymentResult> {
     const res = await fetch(`${this.baseUrl}/verify.json`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         merchant_id: this.merchantId,
         amount,
-        authority,
+        authority: providerRef,
       }),
     })
 
@@ -65,5 +76,9 @@ export class ZarinpalService {
     }
 
     return { success: true, refId: String(json.data.ref_id) }
+  }
+
+  parseCallback(query: Record<string, string>): CallbackQuery {
+    return { providerRef: query.Authority, success: query.Status === 'OK' }
   }
 }

@@ -50,6 +50,8 @@ export const fa = {
     invalidStatus: 'وضعیت پرداخت نامعتبر است',
     description: (planName: string) => `خرید اشتراک ${planName}`,
     gatewayError: 'خطا در اتصال به درگاه پرداخت',
+    gatewayRequired: 'انتخاب درگاه پرداخت الزامی است',
+    gatewayNotEnabled: 'این درگاه پرداخت فعال نیست',
   },
   subscription: {
     activated: 'اشتراک شما فعال شد',

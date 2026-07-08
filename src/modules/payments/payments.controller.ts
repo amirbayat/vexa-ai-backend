@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Redirect, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Param, Post, Query, Redirect, UseGuards } from '@nestjs/common'
 import { JwtGuard } from '../../common/guards/jwt.guard'
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator'
 import { PaymentsService } from './payments.service'
@@ -14,13 +14,15 @@ export class PaymentsController {
     return this.paymentsService.initiate(user.sub, dto)
   }
 
-  @Get('callback')
+  @Get('gateways')
+  getEnabledGateways() {
+    return { gateways: this.paymentsService.getEnabledGateways() }
+  }
+
+  @Get('callback/:provider')
   @Redirect()
-  async callback(
-    @Query('Authority') authority: string,
-    @Query('Status') status: string,
-  ) {
-    const result = await this.paymentsService.verify(authority, status)
+  async callback(@Param('provider') provider: string, @Query() query: Record<string, string>) {
+    const result = await this.paymentsService.verifyCallback(provider, query)
     return { url: result.redirect }
   }
 

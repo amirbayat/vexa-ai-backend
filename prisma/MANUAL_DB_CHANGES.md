@@ -9,13 +9,14 @@
 2. یک فایل SQL دیف بساز که فقط تغییرات لازم را دارد، نه کل schema:
 
    ```bash
+   git show HEAD:prisma/schema.prisma > /tmp/schema-old.prisma
    npx prisma migrate diff \
-     --from-url "$DATABASE_URL" \
-     --to-schema-datamodel prisma/schema.prisma \
+     --from-schema /tmp/schema-old.prisma \
+     --to-schema prisma/schema.prisma \
      --script > prisma/manual-migrations/<YYYYMMDD>_<توضیح-کوتاه>.sql
    ```
 
-   (`--from-url` باید به یک دیتابیس با schema فعلی/قبلی وصل شود — مثلاً دیتابیس local که با آخرین schema اعمال‌شده sync است.)
+   (در Prisma 7، فلگ `--from-url` حذف شده؛ به‌جایش از دو فایل schema — نسخه‌ی قبلی (از git) و نسخه‌ی فعلی — دیف می‌گیریم.)
 
 3. فایل SQL تولید شده را قبل از اجرا بازبینی کن (مخصوصاً برای `DROP COLUMN`/`DROP TABLE`/تغییر type که می‌تواند data loss داشته باشد).
 4. فایل را مستقیم روی دیتابیس پروداکشن اجرا کن (مثلاً `psql $DATABASE_URL -f prisma/manual-migrations/xxx.sql` یا از طریق DB client).
