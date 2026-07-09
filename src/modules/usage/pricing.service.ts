@@ -16,7 +16,7 @@ export interface BudgetStatus {
   spentMonthToman: number
   walletBalanceToman: number
   warningLevel: BudgetWarningLevel
-  cascadeModel: string | null
+  usagePct: number
   upsellSuggestion: string | null
   usdtToman: number
 }
@@ -138,7 +138,6 @@ export class PricingService {
     const ratio = dailyBudget > 0 ? spentToday / dailyBudget : 0
 
     let warningLevel: BudgetWarningLevel = 'none'
-    let cascadeModel: string | null = null
     let upsellSuggestion: string | null = null
 
     if (ratio >= 1) {
@@ -146,11 +145,9 @@ export class PricingService {
       upsellSuggestion = this.upsellMessageFor(planTier)
     } else if (ratio >= this.sessionLimitPct) {
       warningLevel = 'session_limit'
-      cascadeModel = 'openai/gpt-4o-mini'
       upsellSuggestion = this.upsellMessageFor(planTier)
     } else if (ratio >= this.downgradePct) {
       warningLevel = 'critical'
-      cascadeModel = 'openai/gpt-4o-mini'
       upsellSuggestion = this.upsellMessageFor(planTier)
     } else if (ratio >= this.warnPct) {
       warningLevel = 'warning'
@@ -164,13 +161,15 @@ export class PricingService {
       spentMonthToman: spentMonth,
       walletBalanceToman: walletBalance,
       warningLevel,
-      cascadeModel,
+      usagePct: Math.round(ratio * 100),
       upsellSuggestion,
       usdtToman,
     }
   }
 
-  async assertBudget(userId: string, priceMonthly: number, planTier: string): Promise<{ cascadeModel: string | null }> {
+  // usagePct از اینجا به ModelRouterService پاس داده می‌شود تا استپ مسیریابی بودجه‌ای پلن را تعیین کند
+  // (docs/PRD-model-router.md) — دیگر یک مدل کسکید ثابت این‌جا انتخاب نمی‌شود، آن مسئولیت کامل به Router منتقل شده
+  async assertBudget(userId: string, priceMonthly: number, planTier: string): Promise<{ usagePct: number }> {
     const status = await this.getBudgetStatus(userId, priceMonthly, planTier)
 
     if (status.warningLevel === 'exceeded') {
@@ -181,7 +180,7 @@ export class PricingService {
       throw new HttpException(fa.budget.sessionLimit, 429)
     }
 
-    return { cascadeModel: status.cascadeModel }
+    return { usagePct: status.usagePct }
   }
 
   async debitWallet(userId: string, costToman: number, description: string): Promise<boolean> {

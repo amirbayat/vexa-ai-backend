@@ -16,6 +16,7 @@ export interface ThrottleStep {
 }
 
 export interface PlanLimits {
+  planId: string | null // null فقط برای fallback بدون پلن رایگان در دیتابیس
   dailyFreeTokens: number
   monthlyTotalTokens: number
   allowedModels: string[]
@@ -24,6 +25,7 @@ export interface PlanLimits {
   priceMonthly: number
   planTier: string
   planName: string
+  simpleModel: string | null
   dailyMessageLimit: number | null
   throttledMessageCount: number | null
   throttledInputTokens: number | null
@@ -203,6 +205,7 @@ export class TokenService {
     if (sub?.plan) {
       const tier = this.detectTier(sub.plan.name, sub.plan.priceMonthly)
       limits = {
+        planId: sub.plan.id,
         dailyFreeTokens: sub.plan.dailyFreeTokens,
         monthlyTotalTokens: sub.plan.monthlyTotalTokens,
         allowedModels: sub.plan.allowedModels as string[],
@@ -211,6 +214,7 @@ export class TokenService {
         priceMonthly: sub.plan.priceMonthly,
         planTier: tier,
         planName: sub.plan.name,
+        simpleModel: sub.plan.simpleModel ?? null,
         dailyMessageLimit: sub.plan.dailyMessageLimit ?? null,
         throttledMessageCount: sub.plan.throttledMessageCount ?? null,
         throttledInputTokens: sub.plan.throttledInputTokens ?? null,
@@ -225,6 +229,7 @@ export class TokenService {
         orderBy: { sortOrder: 'asc' },
       })
       limits = {
+        planId: freePlan?.id ?? null,
         dailyFreeTokens: freePlan?.dailyFreeTokens ?? 5000,
         monthlyTotalTokens: freePlan?.monthlyTotalTokens ?? 0,
         allowedModels: freePlan ? (freePlan.allowedModels as string[]) : ['openai/gpt-4o-mini'],
@@ -233,6 +238,7 @@ export class TokenService {
         priceMonthly: 0,
         planTier: 'free',
         planName: freePlan?.name ?? 'Free',
+        simpleModel: freePlan?.simpleModel ?? null,
         dailyMessageLimit: freePlan?.dailyMessageLimit ?? null,
         throttledMessageCount: freePlan?.throttledMessageCount ?? null,
         throttledInputTokens: freePlan?.throttledInputTokens ?? null,

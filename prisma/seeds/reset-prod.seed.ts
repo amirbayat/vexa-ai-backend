@@ -26,7 +26,7 @@ const plans = [
     priceMonthly: 0,
     dailyFreeTokens: 5_000,
     monthlyTotalTokens: 0,
-    allowedModels: ['openai/gpt-4o-mini'],
+    allowedModels: ['openai/gpt-5-nano'],
     features: {
       chatHistory: true,
       maxConversations: 10,
@@ -43,7 +43,14 @@ const plans = [
     priceMonthly: 199_000, // تومان
     dailyFreeTokens: 0,
     monthlyTotalTokens: 500_000,
-    allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o'],
+    allowedModels: [
+      'openai/gpt-4o-mini',
+      'openai/gpt-5-nano',
+      'openai/gpt-5-mini',
+      'google/gemini-2.5-flash',
+      'google/gemini-3.1-flash-lite',
+      'google/gemini-2.5-flash-lite',
+    ],
     features: {
       chatHistory: true,
       maxConversations: 100,
@@ -61,7 +68,25 @@ const plans = [
     priceMonthly: 499_000, // تومان
     dailyFreeTokens: 0,
     monthlyTotalTokens: 2_000_000,
-    allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'openai/gpt-4.1'],
+    allowedModels: [
+      'openai/gpt-4o-mini',
+      'openai/gpt-5-nano',
+      'openai/gpt-5-mini',
+      'openai/gpt-5.4-nano',
+      'openai/gpt-5.4-mini',
+      'openai/gpt-5.1-codex-mini',
+      'openai/o4-mini',
+      'openai/o4-mini-high',
+      'openai/gpt-4.1-mini',
+      'google/gemini-2.5-flash',
+      'google/gemini-2.5-flash-lite',
+      'google/gemini-3.1-flash-lite',
+      'google/gemini-3-flash-preview',
+      'x-ai/grok-4.3',
+      'x-ai/grok-4.20',
+      'deepseek/deepseek-v4-pro',
+      'deepseek/deepseek-v4-flash',
+    ],
     features: {
       chatHistory: true,
       maxConversations: -1,

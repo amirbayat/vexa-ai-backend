@@ -10,6 +10,7 @@ import { PricingService } from '../usage/pricing.service'
 
 const CONFIG_CACHE_KEY = 'model_routing_config:cache'
 const CONFIG_CACHE_TTL = 60 // ثانیه
+const STEPS_CACHE_TTL = 60 // ثانیه
 const SINGLETON_ID = 'singleton'
 
 const DEFAULT_SIMPLE_KEYWORDS = [
@@ -44,6 +45,12 @@ interface RoutingConfigShape {
   llmFallbackModel: string
 }
 
+interface RoutingStepShape {
+  order: number
+  thresholdPct: number
+  models: string[]
+}
+
 export interface RouteInput {
   userId: string
   content: string
@@ -51,6 +58,9 @@ export interface RouteInput {
   allowedModels: string[]
   manualModel?: string
   lastAssistantMessageLength?: number
+  planId?: string // اگر خالی باشد (مثلاً پلن رایگان در دیتابیس پیدا نشد)، مسیریابی استپی غیرفعال می‌شود
+  usagePct: number // ۰ تا ۱۰۰+ — درصد مصرف بودجه‌ی روزانه
+  simpleModel?: string | null // مدل ثابت پلن برای پیام‌های SIMPLE
 }
 
 export interface RouteResult {
@@ -121,37 +131,77 @@ export class ModelRouterService {
       }
     }
 
-    // قانون اصلی: پیام ساده همیشه ارزون‌ترین مدل مجاز رو می‌گیره، حتی اگه کاربر دستی مدل قوی‌تری انتخاب کرده باشه
     if (tier === ModelTier.SIMPLE) {
-      const modelId = this.pickFromCandidates(candidates, ModelTier.SIMPLE)
-      return {
-        modelId,
-        tier,
-        method,
-        confidence,
-        overriddenManualModel:
-          input.manualModel && input.manualModel !== modelId
-            ? input.manualModel
-            : null,
-      }
+      return this.routeSimple(input, candidates, tier, method, confidence)
     }
 
-    // MEDIUM/COMPLEX: انتخاب دستی کاربر (اگه مجاز و سازگار باشه) محترم شمرده می‌شه
+    return this.routeMediumComplex(input, candidates, tier, method, confidence)
+  }
+
+  private routeSimple(
+    input: RouteInput,
+    candidates: AiModel[],
+    tier: ModelTier,
+    method: string,
+    confidence: number,
+  ): RouteResult {
+    // مدل ثابت پلن برای SIMPLE — اگر تنظیم و در دسترس باشد؛ وگرنه رفتار قدیمی (ارزان‌ترین کاندید SIMPLE)
+    const fixed = input.simpleModel ? candidates.find((c) => c.name === input.simpleModel) : undefined
+    const modelId = fixed ? fixed.name : this.pickFromCandidates(candidates, ModelTier.SIMPLE)
+
+    return {
+      modelId,
+      tier,
+      method: fixed ? 'simple_fixed' : method,
+      confidence,
+      overriddenManualModel:
+        input.manualModel && input.manualModel !== modelId ? input.manualModel : null,
+    }
+  }
+
+  private async routeMediumComplex(
+    input: RouteInput,
+    candidates: AiModel[],
+    tier: ModelTier,
+    method: string,
+    confidence: number,
+  ): Promise<RouteResult> {
+    const steps = input.planId ? await this.getSteps(input.planId) : []
+
+    // پلن استپ تعریف نکرده (مثلاً رایگان) — رفتار قدیمی بدون تغییر
+    if (!steps.length) {
+      if (input.manualModel && candidates.some((c) => c.name === input.manualModel)) {
+        return { modelId: input.manualModel, tier, method: 'manual', confidence: 1, overriddenManualModel: null }
+      }
+      const modelId = this.pickFromCandidates(candidates, tier)
+      return { modelId, tier, method, confidence, overriddenManualModel: null }
+    }
+
+    const firstStep = steps[0]
+    const currentStep = steps.find((s) => input.usagePct <= s.thresholdPct) ?? steps[steps.length - 1]
+
+    // وفاداری به انتخاب دستی — فقط تا سقف استپ اول همین پلن
     if (
       input.manualModel &&
+      input.usagePct <= firstStep.thresholdPct &&
       candidates.some((c) => c.name === input.manualModel)
     ) {
-      return {
-        modelId: input.manualModel,
-        tier,
-        method: 'manual',
-        confidence: 1,
-        overriddenManualModel: null,
-      }
+      return { modelId: input.manualModel, tier, method: 'manual', confidence: 1, overriddenManualModel: null }
     }
 
-    const modelId = this.pickFromCandidates(candidates, tier)
-    return { modelId, tier, method, confidence, overriddenManualModel: null }
+    const stepCandidates = candidates.filter((c) => currentStep.models.includes(c.name))
+    // اگر استپ فعلی هیچ مدل معتبری نداشت (مثلاً همه isActive=false شدند)، فال‌بک به کل کاندیدهای پلن
+    const pool = stepCandidates.length ? stepCandidates : candidates
+    const preferredOrder = stepCandidates.length ? currentStep.models : undefined
+
+    const modelId = this.pickFromCandidates(pool, tier, preferredOrder)
+    return {
+      modelId,
+      tier,
+      method: stepCandidates.length ? 'budget_step' : method,
+      confidence,
+      overriddenManualModel: input.manualModel && input.manualModel !== modelId ? input.manualModel : null,
+    }
   }
 
   /** لاگ async — هیچ‌وقت نباید فلوی چت رو کند یا مختل کنه */
@@ -179,6 +229,29 @@ export class ModelRouterService {
 
   async invalidateConfigCache(): Promise<void> {
     await this.redis.del(CONFIG_CACHE_KEY)
+  }
+
+  async invalidateStepsCache(planId: string): Promise<void> {
+    await this.redis.del(stepsCacheKey(planId))
+  }
+
+  private async getSteps(planId: string): Promise<RoutingStepShape[]> {
+    const cacheKey = stepsCacheKey(planId)
+    const cached = await this.redis.get(cacheKey)
+    if (cached) return JSON.parse(cached) as RoutingStepShape[]
+
+    const rows = await this.prisma.planRoutingStep.findMany({
+      where: { planId },
+      orderBy: { order: 'asc' },
+    })
+    const steps: RoutingStepShape[] = rows.map((r) => ({
+      order: r.order,
+      thresholdPct: r.thresholdPct,
+      models: r.models as string[],
+    }))
+
+    await this.redis.set(cacheKey, JSON.stringify(steps), 'EX', STEPS_CACHE_TTL)
+    return steps
   }
 
   private async getConfig(): Promise<RoutingConfigShape> {
@@ -326,17 +399,30 @@ COMPLEX: استدلال چندمرحله‌ای، کد/معماری پیچیده
   private pickFromCandidates(
     candidates: AiModel[],
     desiredTier: ModelTier,
+    preferredOrder?: string[],
   ): string {
+    const orderIndex = (name: string): number => {
+      if (!preferredOrder) return 0
+      const idx = preferredOrder.indexOf(name)
+      return idx === -1 ? preferredOrder.length : idx
+    }
+    const tieBreak = (a: AiModel, b: AiModel): number =>
+      preferredOrder ? orderIndex(a.name) - orderIndex(b.name) : a.sortOrder - b.sortOrder
+
     const exact = candidates.filter((c) => c.tier === desiredTier)
-    if (exact.length) return exact[0].name
+    if (exact.length) return [...exact].sort(tieBreak)[0].name
 
     const sorted = [...candidates].sort((a, b) => {
       const da = Math.abs(TIER_RANK[a.tier] - TIER_RANK[desiredTier])
       const db = Math.abs(TIER_RANK[b.tier] - TIER_RANK[desiredTier])
-      return da - db || a.sortOrder - b.sortOrder
+      return da - db || tieBreak(a, b)
     })
     return sorted[0].name
   }
+}
+
+function stepsCacheKey(planId: string): string {
+  return `plan_routing_steps:cache:${planId}`
 }
 
 function countKeywordHits(text: string, keywords: string[]): number {

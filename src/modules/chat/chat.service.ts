@@ -174,10 +174,10 @@ export class ChatService {
       throw new BadRequestException(fa.chat.inputTooLong(effectiveInputLimit))
     }
 
-    // ── budget check + cascade model ───────────────────────────────────────
-    let cascadeModel: string | null
+    // ── budget check + usage percentage (برای مسیریابی استپی Router) ────────
+    let usagePct: number
     try {
-      ;({ cascadeModel } = await this.pricingService.assertBudget(
+      ;({ usagePct } = await this.pricingService.assertBudget(
         userId,
         plan.priceMonthly,
         plan.planTier,
@@ -215,8 +215,11 @@ export class ChatService {
       allowedModels: allowed,
       manualModel: validManualModel,
       lastAssistantMessageLength: lastAssistant?.content.length,
+      planId: plan.planId ?? undefined,
+      usagePct,
+      simpleModel: plan.simpleModel,
     })
-    let modelId = routed.modelId
+    const modelId = routed.modelId
     this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => {})
 
     // ── vision check (preflight) ──────────────────────────────────────────
@@ -272,12 +275,6 @@ export class ChatService {
       )
     }
 
-    if (cascadeModel) {
-      modelId = cascadeModel
-      res.write(
-        `data: ${JSON.stringify({ info: 'model_cascaded', model: cascadeModel })}\n\n`,
-      )
-    }
     if (throttledMax < 4096) {
       res.write(
         `data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`,

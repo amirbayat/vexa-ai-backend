@@ -10,7 +10,7 @@ const plans = [
     priceMonthly: 0,
     dailyFreeTokens: 5_000,
     monthlyTotalTokens: 0,
-    allowedModels: ['openai/gpt-4o-mini'],
+    allowedModels: ['openai/gpt-5-nano'],
     features: {
       chatHistory: true,
       maxConversations: 10,
@@ -26,7 +26,14 @@ const plans = [
     priceMonthly: 199_000, // تومان
     dailyFreeTokens: 0,
     monthlyTotalTokens: 500_000,
-    allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o'],
+    allowedModels: [
+      'openai/gpt-4o-mini',
+      'openai/gpt-5-nano',
+      'openai/gpt-5-mini',
+      'google/gemini-2.5-flash',
+      'google/gemini-3.1-flash-lite',
+      'google/gemini-2.5-flash-lite',
+    ],
     features: {
       chatHistory: true,
       maxConversations: 100,
@@ -43,7 +50,25 @@ const plans = [
     priceMonthly: 499_000, // تومان
     dailyFreeTokens: 0,
     monthlyTotalTokens: 2_000_000,
-    allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'openai/gpt-4.1'],
+    allowedModels: [
+      'openai/gpt-4o-mini',
+      'openai/gpt-5-nano',
+      'openai/gpt-5-mini',
+      'openai/gpt-5.4-nano',
+      'openai/gpt-5.4-mini',
+      'openai/gpt-5.1-codex-mini',
+      'openai/o4-mini',
+      'openai/o4-mini-high',
+      'openai/gpt-4.1-mini',
+      'google/gemini-2.5-flash',
+      'google/gemini-2.5-flash-lite',
+      'google/gemini-3.1-flash-lite',
+      'google/gemini-3-flash-preview',
+      'x-ai/grok-4.3',
+      'x-ai/grok-4.20',
+      'deepseek/deepseek-v4-pro',
+      'deepseek/deepseek-v4-flash',
+    ],
     features: {
       chatHistory: true,
       maxConversations: -1, // unlimited
@@ -58,6 +83,47 @@ const plans = [
   },
 ]
 
+// مسیریابی مدل بر اساس درصد مصرف بودجه‌ی روزانه — رایگان استپ ندارد (فقط یک مدل دارد، لازم نیست)
+const routingSteps: Record<string, { order: number; thresholdPct: number; models: string[] }[]> = {
+  اکو: [
+    { order: 1, thresholdPct: 60, models: ['openai/gpt-5-mini', 'google/gemini-2.5-flash'] },
+    { order: 2, thresholdPct: 90, models: ['openai/gpt-5-nano', 'google/gemini-3.1-flash-lite', 'google/gemini-2.5-flash-lite'] },
+    { order: 3, thresholdPct: 100, models: ['openai/gpt-5-nano'] },
+  ],
+  پلاس: [
+    {
+      order: 1,
+      thresholdPct: 70,
+      models: [
+        'openai/gpt-5.4-mini',
+        'openai/gpt-5.1-codex-mini',
+        'openai/o4-mini',
+        'openai/o4-mini-high',
+        'google/gemini-3-flash-preview',
+        'google/gemini-2.5-flash',
+        'x-ai/grok-4.3',
+        'x-ai/grok-4.20',
+      ],
+    },
+    {
+      order: 2,
+      thresholdPct: 90,
+      models: ['openai/gpt-5.4-nano', 'openai/gpt-5-mini', 'openai/gpt-4.1-mini', 'google/gemini-3.1-flash-lite'],
+    },
+    {
+      order: 3,
+      thresholdPct: 100,
+      models: [
+        'openai/gpt-5-nano',
+        'openai/gpt-4o-mini',
+        'google/gemini-2.5-flash-lite',
+        'deepseek/deepseek-v4-pro',
+        'deepseek/deepseek-v4-flash',
+      ],
+    },
+  ],
+}
+
 async function main() {
   console.log('Seeding plans...')
 
@@ -68,6 +134,20 @@ async function main() {
       create: plan,
     })
     console.log(`  ✓ ${plan.name}`)
+  }
+
+  console.log('Seeding routing steps...')
+  for (const [planName, steps] of Object.entries(routingSteps)) {
+    const plan = await prisma.plan.findUnique({ where: { name: planName } })
+    if (!plan) continue
+    for (const step of steps) {
+      await prisma.planRoutingStep.upsert({
+        where: { planId_order: { planId: plan.id, order: step.order } },
+        update: {}, // never overwrite admin edits — only create if missing
+        create: { planId: plan.id, order: step.order, thresholdPct: step.thresholdPct, models: step.models },
+      })
+    }
+    console.log(`  ✓ ${planName} (${steps.length} steps)`)
   }
 
   console.log('Done.')
