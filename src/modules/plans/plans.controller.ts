@@ -21,6 +21,11 @@ export class PlansController {
     return this.plansService.findAllAdmin()
   }
 
+  @Get('model-catalog')
+  findModelCatalog() {
+    return this.plansService.findModelCatalog()
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.plansService.findOne(id)

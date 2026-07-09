@@ -173,7 +173,7 @@ export class TokenService {
     const records = await this.prisma.dailyUsage.findMany({
       where: { userId, date: { gte: start, lt: end } },
       orderBy: { date: 'asc' },
-      select: { date: true, freeTokensUsed: true, paidTokensUsed: true, requestsCount: true, costRial: true },
+      select: { date: true, freeTokensUsed: true, paidTokensUsed: true, requestsCount: true, costToman: true },
     })
 
     return records.map(r => ({
@@ -181,7 +181,7 @@ export class TokenService {
       freeTokensUsed: r.freeTokensUsed,
       paidTokensUsed: r.paidTokensUsed,
       requestsCount: r.requestsCount,
-      costRial: r.costRial,
+      costToman: r.costToman,
     }))
   }
 

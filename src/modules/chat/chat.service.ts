@@ -364,7 +364,7 @@ export class ChatService {
 
       const usage = await result.usage
       const tokensUsed = usage.totalTokens ?? 0
-      const { costRial, costUsdMicros, costInputUsdMicros, costOutputUsdMicros } =
+      const { costToman, costUsdMicros, costInputUsdMicros, costOutputUsdMicros } =
         await this.pricingService.calcCost(usage.inputTokens ?? 0, usage.outputTokens ?? 0, modelId)
 
       await this.prisma.message.create({
@@ -375,7 +375,7 @@ export class ChatService {
           content: fullContent,
           tokensInput: usage.inputTokens ?? 0,
           tokensOutput: usage.outputTokens ?? 0,
-          costRial,
+          costToman,
           costUsdMicros,
           costInputUsdMicros,
           costOutputUsdMicros,
@@ -385,7 +385,7 @@ export class ChatService {
 
       await Promise.all([
         this.tokenService.increment(userId, tokensUsed, quota.source),
-        this.pricingService.trackCost(userId, costRial, costUsdMicros),
+        this.pricingService.trackCost(userId, costToman, costUsdMicros),
         this.prisma.conversation.update({
           where: { id: conversationId },
           data: {

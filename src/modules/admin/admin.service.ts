@@ -170,12 +170,12 @@ export class AdminService {
       this.prisma.dailyUsage.groupBy({
         by: ['userId'],
         where: { date: { gte: startOfMonth } },
-        _sum: { costRial: true, costUsdMicros: true },
+        _sum: { costToman: true, costUsdMicros: true },
       }),
     ])
 
     const revenueMap = new Map(monthlyRevenue.map(r => [r.userId, r._sum.amount ?? 0]))
-    const costMap = new Map(monthlyCost.map(r => [r.userId, r._sum.costRial ?? 0]))
+    const costMap = new Map(monthlyCost.map(r => [r.userId, r._sum.costToman ?? 0]))
     const costUsdMap = new Map(monthlyCost.map(r => [r.userId, r._sum.costUsdMicros ?? 0]))
 
     const enriched = users.map(u => {
@@ -250,7 +250,7 @@ export class AdminService {
       this.prisma.dailyUsage.groupBy({
         by: ['date'],
         where: { date: { gte: since } },
-        _sum: { costRial: true, costUsdMicros: true },
+        _sum: { costToman: true, costUsdMicros: true },
         orderBy: { date: 'asc' },
       }),
       this.prisma.$queryRaw<Array<{ day: Date; revenue: bigint }>>`
@@ -268,7 +268,7 @@ export class AdminService {
 
     return costRows.map(r => ({
       date: r.date.toISOString().slice(0, 10),
-      aiCostRial: r._sum.costRial ?? 0,
+      aiCostToman: r._sum.costToman ?? 0,
       aiCostUsd: (r._sum.costUsdMicros ?? 0) / 1_000_000,
       revenueToman: revenueMap.get(r.date.toISOString().slice(0, 10)) ?? 0,
     }))
@@ -285,12 +285,12 @@ export class AdminService {
       }),
       this.prisma.dailyUsage.aggregate({
         where: { date: { gte: startOfMonth } },
-        _sum: { costRial: true, costUsdMicros: true },
+        _sum: { costToman: true, costUsdMicros: true },
       }),
     ])
 
     const monthlyRevenue = revenueRow._sum.amount ?? 0
-    const monthlyAiCost = costRow._sum.costRial ?? 0
+    const monthlyAiCost = costRow._sum.costToman ?? 0
     const monthlyAiCostUsd = (costRow._sum.costUsdMicros ?? 0) / 1_000_000
     const ratio = monthlyRevenue > 0 ? monthlyAiCost / monthlyRevenue : 0
 
@@ -312,7 +312,7 @@ export class AdminService {
 
     return {
       monthlyRevenueToman: monthlyRevenue,
-      monthlyAiCostRial: monthlyAiCost,
+      monthlyAiCostToman: monthlyAiCost,
       monthlyAiCostUsd,
       aiCostRatio: Math.round(ratio * 1000) / 10,
       alertLevel,

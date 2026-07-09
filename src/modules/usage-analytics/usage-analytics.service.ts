@@ -57,10 +57,10 @@ export interface UserUsageRow {
   tokensInput: number
   tokensOutput: number
   avgTokensPerDay: number
-  costRial: number
+  costToman: number
   costUsd: number
-  revenueRial: number
-  marginRial: number
+  revenueToman: number
+  marginToman: number
   mostUsedModel: string | null
   segment: string | null
 }
@@ -85,8 +85,8 @@ export class UsageAnalyticsService {
       growth: {
         totalTokens: pctChange(current.totalTokens, previous.totalTokens),
         totalMessages: pctChange(current.totalMessages, previous.totalMessages),
-        costRial: pctChange(current.costRial, previous.costRial),
-        revenueRial: pctChange(current.revenueRial, previous.revenueRial),
+        costToman: pctChange(current.costToman, previous.costToman),
+        revenueToman: pctChange(current.revenueToman, previous.revenueToman),
       },
     }
   }
@@ -99,7 +99,7 @@ export class UsageAnalyticsService {
           freeTokensUsed: true,
           paidTokensUsed: true,
           requestsCount: true,
-          costRial: true,
+          costToman: true,
           costUsdMicros: true,
         },
       }),
@@ -112,8 +112,8 @@ export class UsageAnalyticsService {
 
     const totalTokens = (usage._sum.freeTokensUsed ?? 0) + (usage._sum.paidTokensUsed ?? 0)
     const totalMessages = usage._sum.requestsCount ?? 0
-    const costRial = usage._sum.costRial ?? 0
-    const revenueRial = revenue._sum.amount ?? 0
+    const costToman = usage._sum.costToman ?? 0
+    const revenueToman = revenue._sum.amount ?? 0
 
     // میانگین توکن ورودی/خروجی و میانگین وزنیِ قیمت هر میلیون توکن، از روی
     // model breakdown همین بازه محاسبه می‌شود — چون DailyUsage توکن ورودی/خروجی
@@ -124,24 +124,24 @@ export class UsageAnalyticsService {
     const totalOutputTokens = modelBreakdown.reduce((s, m) => s + m.tokensOutput, 0)
     const totalInputCostUsd = modelBreakdown.reduce((s, m) => s + m.costInputUsd, 0)
     const totalOutputCostUsd = modelBreakdown.reduce((s, m) => s + m.costOutputUsd, 0)
-    const totalInputCostRial = modelBreakdown.reduce((s, m) => s + m.costInputRial, 0)
-    const totalOutputCostRial = modelBreakdown.reduce((s, m) => s + m.costOutputRial, 0)
+    const totalInputCostToman = modelBreakdown.reduce((s, m) => s + m.costInputToman, 0)
+    const totalOutputCostToman = modelBreakdown.reduce((s, m) => s + m.costOutputToman, 0)
 
     return {
       totalTokens,
       totalMessages,
-      costRial,
+      costToman,
       costUsd: (usage._sum.costUsdMicros ?? 0) / 1_000_000,
-      revenueRial,
-      marginRial: revenueRial - costRial,
-      marginPct: revenueRial > 0 ? (revenueRial - costRial) / revenueRial : null,
+      revenueToman,
+      marginToman: revenueToman - costToman,
+      marginPct: revenueToman > 0 ? (revenueToman - costToman) / revenueToman : null,
       avgTokensPerMessage: totalMessages > 0 ? Math.round(totalTokens / totalMessages) : 0,
       avgInputTokensPerMessage: messagesWithModel > 0 ? Math.round(totalInputTokens / messagesWithModel) : 0,
       avgOutputTokensPerMessage: messagesWithModel > 0 ? Math.round(totalOutputTokens / messagesWithModel) : 0,
       avgInputPricePerMillionUsd: totalInputTokens > 0 ? (totalInputCostUsd / totalInputTokens) * 1_000_000 : 0,
       avgOutputPricePerMillionUsd: totalOutputTokens > 0 ? (totalOutputCostUsd / totalOutputTokens) * 1_000_000 : 0,
-      avgInputPricePerMillionRial: totalInputTokens > 0 ? Math.round((totalInputCostRial / totalInputTokens) * 1_000_000) : 0,
-      avgOutputPricePerMillionRial: totalOutputTokens > 0 ? Math.round((totalOutputCostRial / totalOutputTokens) * 1_000_000) : 0,
+      avgInputPricePerMillionToman: totalInputTokens > 0 ? Math.round((totalInputCostToman / totalInputTokens) * 1_000_000) : 0,
+      avgOutputPricePerMillionToman: totalOutputTokens > 0 ? Math.round((totalOutputCostToman / totalOutputTokens) * 1_000_000) : 0,
       topModel: modelBreakdown[0]?.model ?? null,
     }
   }
@@ -154,7 +154,7 @@ export class UsageAnalyticsService {
         freeTokensUsed: true,
         paidTokensUsed: true,
         requestsCount: true,
-        costRial: true,
+        costToman: true,
         costUsdMicros: true,
       },
       orderBy: { date: 'asc' },
@@ -164,7 +164,7 @@ export class UsageAnalyticsService {
       date: r.date.toISOString().slice(0, 10),
       tokens: (r._sum.freeTokensUsed ?? 0) + (r._sum.paidTokensUsed ?? 0),
       messages: r._sum.requestsCount ?? 0,
-      costRial: r._sum.costRial ?? 0,
+      costToman: r._sum.costToman ?? 0,
       costUsd: (r._sum.costUsdMicros ?? 0) / 1_000_000,
     }))
 
@@ -172,14 +172,14 @@ export class UsageAnalyticsService {
 
     const buckets = new Map<
       string,
-      { tokens: number; messages: number; costRial: number; costUsd: number }
+      { tokens: number; messages: number; costToman: number; costUsd: number }
     >()
     for (const p of points) {
       const key = granularity === 'month' ? p.date.slice(0, 7) : isoWeekKey(p.date)
-      const b = buckets.get(key) ?? { tokens: 0, messages: 0, costRial: 0, costUsd: 0 }
+      const b = buckets.get(key) ?? { tokens: 0, messages: 0, costToman: 0, costUsd: 0 }
       b.tokens += p.tokens
       b.messages += p.messages
-      b.costRial += p.costRial
+      b.costToman += p.costToman
       b.costUsd += p.costUsd
       buckets.set(key, b)
     }
@@ -188,7 +188,7 @@ export class UsageAnalyticsService {
       .sort((a, b) => a.period.localeCompare(b.period))
   }
 
-  // هزینه/توکن دقیقاً از Message.costRial/costUsdMicros خوانده می‌شود — همان
+  // هزینه/توکن دقیقاً از Message.costToman/costUsdMicros خوانده می‌شود — همان
   // عددی که لحظه‌ی ایجاد پیام محاسبه شده، نه بازمحاسبه با قیمت/نرخ فعلی
   async getModelBreakdown(range: DateRange, userId?: string) {
     const rows = await this.prisma.message.groupBy({
@@ -202,7 +202,7 @@ export class UsageAnalyticsService {
       _sum: {
         tokensInput: true,
         tokensOutput: true,
-        costRial: true,
+        costToman: true,
         costUsdMicros: true,
         costInputUsdMicros: true,
         costOutputUsdMicros: true,
@@ -213,32 +213,32 @@ export class UsageAnalyticsService {
       .map((r) => {
         const tokensInput = r._sum.tokensInput ?? 0
         const tokensOutput = r._sum.tokensOutput ?? 0
-        const costRial = r._sum.costRial ?? 0
+        const costToman = r._sum.costToman ?? 0
         const costUsd = (r._sum.costUsdMicros ?? 0) / 1_000_000
         const costInputUsd = (r._sum.costInputUsdMicros ?? 0) / 1_000_000
         const costOutputUsd = (r._sum.costOutputUsdMicros ?? 0) / 1_000_000
-        // سهم ریالی ورودی/خروجی مستقیم ذخیره نشده — از همون نسبت دلاری (که با نرخ
-        // لحظه‌ی ثبت پیام محاسبه شده) روی costRial واقعی (persisted) تسهیم می‌شود،
+        // سهم تومانی ورودی/خروجی مستقیم ذخیره نشده — از همون نسبت دلاری (که با نرخ
+        // لحظه‌ی ثبت پیام محاسبه شده) روی costToman واقعی (persisted) تسهیم می‌شود،
         // نه با نرخ ارز فعلی بازمحاسبه
-        const costInputRial = costUsd > 0 ? Math.round(costRial * (costInputUsd / costUsd)) : 0
-        const costOutputRial = costUsd > 0 ? Math.round(costRial * (costOutputUsd / costUsd)) : 0
+        const costInputToman = costUsd > 0 ? Math.round(costToman * (costInputUsd / costUsd)) : 0
+        const costOutputToman = costUsd > 0 ? Math.round(costToman * (costOutputUsd / costUsd)) : 0
         return {
           model: r.model as string,
           messages: r._count.id,
           tokensInput,
           tokensOutput,
-          costRial,
+          costToman,
           costUsd,
           costInputUsd,
           costOutputUsd,
-          costInputRial,
-          costOutputRial,
+          costInputToman,
+          costOutputToman,
           // میانگین وزنیِ قیمت هر میلیون توکن برای همین مدل در این بازه
           avgInputPricePerMillionUsd: tokensInput > 0 ? (costInputUsd / tokensInput) * 1_000_000 : 0,
           avgOutputPricePerMillionUsd: tokensOutput > 0 ? (costOutputUsd / tokensOutput) * 1_000_000 : 0,
         }
       })
-      .sort((a, b) => b.costRial - a.costRial)
+      .sort((a, b) => b.costToman - a.costToman)
   }
 
   getUserModelBreakdown(userId: string, range: DateRange) {
@@ -318,7 +318,7 @@ export class UsageAnalyticsService {
       this.prisma.message.groupBy({
         by: ['userId', 'model'],
         where: { role: 'ASSISTANT', userId: { not: null }, createdAt: { gte: range.from, lte: range.to } },
-        _sum: { tokensInput: true, tokensOutput: true, costRial: true, costUsdMicros: true },
+        _sum: { tokensInput: true, tokensOutput: true, costToman: true, costUsdMicros: true },
         _count: { id: true },
       }),
       this.prisma.payment.groupBy({
@@ -333,7 +333,7 @@ export class UsageAnalyticsService {
       messages: number
       tokensInput: number
       tokensOutput: number
-      costRial: number
+      costToman: number
       costUsdMicros: number
       modelCounts: Map<string, number>
     }
@@ -344,14 +344,14 @@ export class UsageAnalyticsService {
         messages: 0,
         tokensInput: 0,
         tokensOutput: 0,
-        costRial: 0,
+        costToman: 0,
         costUsdMicros: 0,
         modelCounts: new Map<string, number>(),
       }
       agg.messages += row._count.id
       agg.tokensInput += row._sum.tokensInput ?? 0
       agg.tokensOutput += row._sum.tokensOutput ?? 0
-      agg.costRial += row._sum.costRial ?? 0
+      agg.costToman += row._sum.costToman ?? 0
       agg.costUsdMicros += row._sum.costUsdMicros ?? 0
       if (row.model) agg.modelCounts.set(row.model, (agg.modelCounts.get(row.model) ?? 0) + row._count.id)
       byUser.set(uid, agg)
@@ -369,7 +369,7 @@ export class UsageAnalyticsService {
 
     let results: UserUsageRow[] = userIds.map((userId) => {
       const agg = byUser.get(userId)!
-      const revenueRial = revenueMap.get(userId) ?? 0
+      const revenueToman = revenueMap.get(userId) ?? 0
       const avgMessagesPerDay = agg.messages / days
       const avgTokensPerDay = (agg.tokensInput + agg.tokensOutput) / days
       const segment = this.matchSegment(segments, avgMessagesPerDay, avgTokensPerDay)
@@ -385,17 +385,17 @@ export class UsageAnalyticsService {
         tokensInput: agg.tokensInput,
         tokensOutput: agg.tokensOutput,
         avgTokensPerDay,
-        costRial: agg.costRial,
+        costToman: agg.costToman,
         costUsd: agg.costUsdMicros / 1_000_000,
-        revenueRial,
-        marginRial: revenueRial - agg.costRial,
+        revenueToman,
+        marginToman: revenueToman - agg.costToman,
         mostUsedModel,
         segment: segment?.label ?? null,
       }
     })
 
     if (segmentLabel) results = results.filter((r) => r.segment === segmentLabel)
-    return results.sort((a, b) => b.costRial - a.costRial)
+    return results.sort((a, b) => b.costToman - a.costToman)
   }
 
   async exportUsersCsv(range: DateRange, segmentLabel?: string): Promise<string> {
@@ -410,8 +410,8 @@ export class UsageAnalyticsService {
       lines.push(
         [
           u.phone, u.name, u.messages, u.avgMessagesPerDay.toFixed(1),
-          u.tokensInput, u.tokensOutput, u.costRial, u.costUsd.toFixed(4),
-          u.revenueRial, u.marginRial, u.mostUsedModel, u.segment,
+          u.tokensInput, u.tokensOutput, u.costToman, u.costUsd.toFixed(4),
+          u.revenueToman, u.marginToman, u.mostUsedModel, u.segment,
         ]
           .map(csvEscape)
           .join(','),
@@ -439,9 +439,9 @@ export class UsageAnalyticsService {
     return Array.from(groups.entries()).map(([label, group]) => {
       const msgValues = group.map((g) => g.avgMessagesPerDay).sort((a, b) => a - b)
       const tokenValues = group.map((g) => g.avgTokensPerDay).sort((a, b) => a - b)
-      const costRial = group.reduce((s, g) => s + g.costRial, 0)
+      const costToman = group.reduce((s, g) => s + g.costToman, 0)
       const costUsd = group.reduce((s, g) => s + g.costUsd, 0)
-      const revenueRial = group.reduce((s, g) => s + g.revenueRial, 0)
+      const revenueToman = group.reduce((s, g) => s + g.revenueToman, 0)
       return {
         label,
         userCount: group.length,
@@ -451,11 +451,11 @@ export class UsageAnalyticsService {
         avgTokensPerDay: tokenValues.reduce((s, v) => s + v, 0) / group.length,
         medianTokensPerDay: percentile(tokenValues, 50),
         p90TokensPerDay: percentile(tokenValues, 90),
-        costRial,
+        costToman,
         costUsd,
-        revenueRial,
-        marginRial: revenueRial - costRial,
-        marginPct: revenueRial > 0 ? (revenueRial - costRial) / revenueRial : null,
+        revenueToman,
+        marginToman: revenueToman - costToman,
+        marginPct: revenueToman > 0 ? (revenueToman - costToman) / revenueToman : null,
       }
     })
   }

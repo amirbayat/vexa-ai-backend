@@ -43,7 +43,7 @@ export class TokenFlushProcessor {
       freeTokensUsed: number;
       paidTokensUsed: number;
       requestsCount: number;
-      costRial: number;
+      costToman: number;
       costUsdMicros: number;
     };
     const userMap = new Map<string, Row>();
@@ -53,7 +53,7 @@ export class TokenFlushProcessor {
           freeTokensUsed: 0,
           paidTokensUsed: 0,
           requestsCount: 0,
-          costRial: 0,
+          costToman: 0,
           costUsdMicros: 0,
         });
       return userMap.get(id)!;
@@ -81,7 +81,7 @@ export class TokenFlushProcessor {
       row(k.split(':')[2]).requestsCount = Number(values[o3 + i]) || 0;
     });
     costKeys.forEach((k, i) => {
-      row(k.split(':')[2]).costRial = Number(values[o4 + i]) || 0;
+      row(k.split(':')[2]).costToman = Number(values[o4 + i]) || 0;
     });
     costUsdKeys.forEach((k, i) => {
       row(k.split(':')[2]).costUsdMicros = Number(values[o5 + i]) || 0;

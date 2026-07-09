@@ -12,8 +12,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   ZIBAL: 'زیبال',
 }
 
-function toman(rial: number): string {
-  return Math.round(rial / 10).toLocaleString('en-US')
+function toman(amountToman: number): string {
+  return amountToman.toLocaleString('en-US')
 }
 
 function invoiceNumber(inv: Invoice): string {

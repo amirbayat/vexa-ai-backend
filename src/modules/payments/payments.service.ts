@@ -35,8 +35,9 @@ export class PaymentsService {
 
     this.logger.log(`initiate: gateway=${gateway.name} callbackUrl=${callbackUrl}`)
 
+    // مرز تبدیل: همه‌جای پروژه تومان است، ولی API درگاه‌های پرداخت (زرین‌پال/وندار/زیبال) فقط ریال قبول می‌کند
     const { providerRef, paymentUrl } = await gateway.createPayment({
-      amount: plan.priceMonthly,
+      amount: plan.priceMonthly * 10,
       description: fa.payment.description(plan.name),
       callbackUrl,
     })
@@ -99,7 +100,8 @@ export class PaymentsService {
     }
     if (payment.status !== 'PENDING') throw new BadRequestException(fa.payment.invalidStatus)
 
-    const { success, refId } = await gateway.verifyPayment({ amount: payment.amount, providerRef })
+    // مرز تبدیل: payment.amount در دیتابیس تومان است؛ verify باید همان مبلغ ریالی اصلی createPayment را بدهد
+    const { success, refId } = await gateway.verifyPayment({ amount: payment.amount * 10, providerRef })
     this.logger.log(`verify: gateway.verifyPayment result success=${success} refId=${refId}`)
 
     if (!success) {

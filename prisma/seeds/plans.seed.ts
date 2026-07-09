@@ -23,7 +23,7 @@ const plans = [
   },
   {
     name: 'اکو',
-    priceMonthly: 1_990_000, // 199,000 Tomans in Rials
+    priceMonthly: 199_000, // تومان
     dailyFreeTokens: 0,
     monthlyTotalTokens: 500_000,
     allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o'],
@@ -40,7 +40,7 @@ const plans = [
   },
   {
     name: 'پلاس',
-    priceMonthly: 4_990_000, // 499,000 Tomans in Rials
+    priceMonthly: 499_000, // تومان
     dailyFreeTokens: 0,
     monthlyTotalTokens: 2_000_000,
     allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'openai/gpt-4.1'],

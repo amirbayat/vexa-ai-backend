@@ -300,17 +300,18 @@ export class ModelRouterService {
         system: `این پیام کاربر را از نظر سختی طبقه‌بندی کن.
 SIMPLE: احوال‌پرسی، سوال کوتاه واقعیت‌محور، ترجمه/بازنویسی کوتاه.
 MEDIUM: نوشتن متن چندبندی، توضیح مفهوم، کد کوتاه.
-COMPLEX: استدلال چندمرحله‌ای، کد/معماری پیچیده، تحلیل سند بلند، درخواست صریح تفکر عمیق.`,
+COMPLEX: استدلال چندمرحله‌ای، کد/معماری پیچیده، تحلیل سند بلند، درخواست صریح تفکر عمیق.
+فقط یک JSON با این ساختار برگردان: {"tier": "SIMPLE" | "MEDIUM" | "COMPLEX", "reason": "..."}`,
         messages: [{ role: 'user', content: content.slice(0, 2000) }],
       })
 
       if (usage) {
-        const { costRial, costUsdMicros } = await this.pricingService.calcCost(
+        const { costToman, costUsdMicros } = await this.pricingService.calcCost(
           usage.inputTokens ?? 0,
           usage.outputTokens ?? 0,
           modelId,
         )
-        this.pricingService.trackCost(userId, costRial, costUsdMicros).catch(() => {})
+        this.pricingService.trackCost(userId, costToman, costUsdMicros).catch(() => {})
       }
 
       return { tier: ModelTier[object.tier], confidence: 0.75 }

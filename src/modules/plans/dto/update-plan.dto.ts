@@ -10,7 +10,7 @@ export class UpdatePlanDto {
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  priceMonthly?: number
+  priceMonthly?: number // تومان
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })

@@ -2,14 +2,14 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config'
 import { RedisService } from '../redis/redis.service'
 
-const REDIS_KEY = 'exchange:usdt_rial'
-const REDIS_UPDATED_AT_KEY = 'exchange:usdt_rial:updated_at'
+const REDIS_KEY = 'exchange:usdt_toman'
+const REDIS_UPDATED_AT_KEY = 'exchange:usdt_toman:updated_at'
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 const API_URL = 'https://api.tetherland.com/currencies'
-const FALLBACK_RATE_KEY = 'USD_TO_RIAL'
+const FALLBACK_RATE_KEY = 'USD_TO_TOMAN'
 
 export interface RateInfo {
-  rial: number
+  toman: number
   updatedAt: string | null // null یعنی هیچ‌وقت رفرش زنده موفق نشده و مقدار fallback است
   source: 'live' | 'fallback'
 }
@@ -24,8 +24,8 @@ export class ExchangeRateService implements OnModuleInit, OnModuleDestroy {
     private readonly redis: RedisService,
     private readonly config: ConfigService,
   ) {
-    // USD_TO_RIAL به‌صورت تومانی تنظیم می‌شود (مثلاً ۹۰۰٬۰۰۰ تومان) — در ۱۰ ضرب می‌شود تا واقعاً ریال باشد
-    this.fallbackRate = Number(this.config.get(FALLBACK_RATE_KEY, '900000')) * 10
+    // USD_TO_TOMAN مستقیماً تومانی است (مثلاً ۹۰٬۰۰۰ تومان) — تترلند هم تومان برمی‌گرداند، پس دیگر تبدیلی لازم نیست
+    this.fallbackRate = Number(this.config.get(FALLBACK_RATE_KEY, '90000'))
   }
 
   async onModuleInit() {
@@ -37,21 +37,21 @@ export class ExchangeRateService implements OnModuleInit, OnModuleDestroy {
     if (this.intervalId) clearInterval(this.intervalId)
   }
 
-  async getUsdtRial(): Promise<number> {
+  async getUsdtToman(): Promise<number> {
     const cached = await this.redis.get(REDIS_KEY)
     if (cached) return Number(cached)
     return this.fallbackRate
   }
 
-  // برای نمایش «آخرین بروزرسانی نرخ دلار» در پنل ادمین — چون getUsdtRial() فقط
+  // برای نمایش «آخرین بروزرسانی نرخ دلار» در پنل ادمین — چون getUsdtToman() فقط
   // عدد رو برمی‌گردونه و به‌صورت شفاف نمی‌گه از کش زنده استفاده شده یا از fallback ثابت
   async getRateInfo(): Promise<RateInfo> {
     const [cached, updatedAt] = await Promise.all([
       this.redis.get(REDIS_KEY),
       this.redis.get(REDIS_UPDATED_AT_KEY),
     ])
-    if (cached) return { rial: Number(cached), updatedAt: updatedAt ?? null, source: 'live' }
-    return { rial: this.fallbackRate, updatedAt: null, source: 'fallback' }
+    if (cached) return { toman: Number(cached), updatedAt: updatedAt ?? null, source: 'live' }
+    return { toman: this.fallbackRate, updatedAt: null, source: 'fallback' }
   }
 
   private async refresh(): Promise<void> {
@@ -67,13 +67,12 @@ export class ExchangeRateService implements OnModuleInit, OnModuleDestroy {
       const price = body?.data?.currencies?.USDT?.price
       if (!price || price <= 0) throw new Error('invalid price in response')
 
-      // تترلند قیمت را به تومان برمی‌گرداند — برای ذخیره‌ی واقعاً ریالی در ۱۰ ضرب می‌شود
-      const priceRial = price * 10
+      // تترلند قیمت را به تومان برمی‌گرداند — نیازی به تبدیل نیست
       await Promise.all([
-        this.redis.set(REDIS_KEY, String(priceRial), 'EX', 600), // 10 min TTL
+        this.redis.set(REDIS_KEY, String(price), 'EX', 600), // 10 min TTL
         this.redis.set(REDIS_UPDATED_AT_KEY, new Date().toISOString(), 'EX', 600),
       ])
-      this.logger.log(`USDT/Rial updated: ${priceRial.toLocaleString()}`)
+      this.logger.log(`USDT/Toman updated: ${price.toLocaleString()}`)
     } catch (err) {
       this.logger.warn(`Exchange rate refresh failed — using cached/fallback. ${err instanceof Error ? err.message : err}`)
     }

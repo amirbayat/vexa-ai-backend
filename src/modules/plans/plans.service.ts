@@ -26,6 +26,22 @@ export class PlansService {
     })
   }
 
+  // فقط فیلدهای عمومی/غیرحساس — بدون قیمت — برای ساخت آیکون/توضیح مدل در فرانت (دراپ‌داون چت، کارت پلن‌ها)
+  findModelCatalog() {
+    return this.prisma.aiModel.findMany({
+      where: { isActive: true },
+      orderBy: { sortOrder: 'asc' },
+      select: {
+        name: true,
+        displayName: true,
+        provider: true,
+        tier: true,
+        supportsVision: true,
+        sortOrder: true,
+      },
+    })
+  }
+
   async findOne(id: string) {
     const plan = await this.prisma.plan.findUnique({ where: { id } })
     if (!plan) throw new NotFoundException(fa.plans.notFound)

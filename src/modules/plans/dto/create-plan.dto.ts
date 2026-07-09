@@ -8,7 +8,7 @@ export class CreatePlanDto {
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  priceMonthly: number
+  priceMonthly: number // تومان
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })

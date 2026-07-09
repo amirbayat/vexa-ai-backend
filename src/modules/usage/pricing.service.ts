@@ -9,16 +9,16 @@ import { fa } from '../../i18n/fa'
 export type BudgetWarningLevel = 'none' | 'warning' | 'critical' | 'session_limit' | 'exceeded'
 
 export interface BudgetStatus {
-  dailyBudgetRial: number
-  spentTodayRial: number
-  remainingTodayRial: number
-  monthlyBudgetRial: number
-  spentMonthRial: number
-  walletBalanceRial: number
+  dailyBudgetToman: number
+  spentTodayToman: number
+  remainingTodayToman: number
+  monthlyBudgetToman: number
+  spentMonthToman: number
+  walletBalanceToman: number
   warningLevel: BudgetWarningLevel
   cascadeModel: string | null
   upsellSuggestion: string | null
-  usdtRial: number
+  usdtToman: number
 }
 
 function dailyCostKey(userId: string) {
@@ -37,7 +37,7 @@ function dailyCostUsdKey(userId: string) {
 }
 
 export interface CostCalc {
-  costRial: number
+  costToman: number
   costUsdMicros: number // دلار × ۱٬۰۰۰٬۰۰۰ — نگه‌داشتن هزینه‌ی خام دلاری برای آنالیز مستقل از نوسان نرخ ارز
   costInputUsdMicros: number // سهم توکن ورودی از costUsdMicros — برای میانگین وزنی قیمت ورودی/خروجی
   costOutputUsdMicros: number
@@ -49,7 +49,7 @@ export class PricingService {
   private readonly warnPct: number
   private readonly downgradePct: number
   private readonly sessionLimitPct: number
-  private readonly freeBudgetRial: number
+  private readonly freeBudgetToman: number
   private readonly walletMarkup: number
 
   constructor(
@@ -63,7 +63,7 @@ export class PricingService {
     this.warnPct = Number(this.config.get('BUDGET_WARN_PCT', '60')) / 100
     this.downgradePct = Number(this.config.get('BUDGET_DOWNGRADE_PCT', '80')) / 100
     this.sessionLimitPct = Number(this.config.get('BUDGET_SESSION_LIMIT_PCT', '90')) / 100
-    this.freeBudgetRial = Number(this.config.get('FREE_PLAN_MONTHLY_BUDGET_RIAL', '50000'))
+    this.freeBudgetToman = Number(this.config.get('FREE_PLAN_MONTHLY_BUDGET_TOMAN', '5000'))
     this.walletMarkup = Number(this.config.get('WALLET_MARKUP', '1.667'))
   }
 
@@ -76,37 +76,37 @@ export class PricingService {
     const inputUsdCost = (inputTokens * price.inputPricePerM) / 1_000_000
     const outputUsdCost = (outputTokens * price.outputPricePerM) / 1_000_000
     const usdCost = inputUsdCost + outputUsdCost
-    const rate = await this.exchangeRate.getUsdtRial()
+    const rate = await this.exchangeRate.getUsdtToman()
     return {
-      costRial: Math.ceil(usdCost * rate),
+      costToman: Math.ceil(usdCost * rate),
       costUsdMicros: Math.round(usdCost * 1_000_000),
       costInputUsdMicros: Math.round(inputUsdCost * 1_000_000),
       costOutputUsdMicros: Math.round(outputUsdCost * 1_000_000),
     }
   }
 
-  async dailyBudgetRial(priceMonthly: number): Promise<number> {
-    if (priceMonthly === 0) return Math.floor(this.freeBudgetRial / 30)
+  async dailyBudgetToman(priceMonthly: number): Promise<number> {
+    if (priceMonthly === 0) return Math.floor(this.freeBudgetToman / 30)
     return Math.floor((priceMonthly * this.aiShare) / 30)
   }
 
-  async monthlyBudgetRial(priceMonthly: number): Promise<number> {
-    if (priceMonthly === 0) return this.freeBudgetRial
+  async monthlyBudgetToman(priceMonthly: number): Promise<number> {
+    if (priceMonthly === 0) return this.freeBudgetToman
     return Math.floor(priceMonthly * this.aiShare)
   }
 
-  walletCostForRial(baseRial: number): number {
-    return Math.ceil(baseRial * this.walletMarkup)
+  walletCostForToman(baseToman: number): number {
+    return Math.ceil(baseToman * this.walletMarkup)
   }
 
-  async trackCost(userId: string, costRial: number, costUsdMicros = 0): Promise<void> {
+  async trackCost(userId: string, costToman: number, costUsdMicros = 0): Promise<void> {
     const dKey = dailyCostKey(userId)
     const mKey = monthlyCostKey(userId)
     const dUsdKey = dailyCostUsdKey(userId)
     await Promise.all([
-      this.redis.incrby(dKey, costRial),
+      this.redis.incrby(dKey, costToman),
       this.redis.expire(dKey, 90_000, 'NX'),
-      this.redis.incrby(mKey, costRial),
+      this.redis.incrby(mKey, costToman),
       this.redis.expire(mKey, 2_764_800, 'NX'),
       this.redis.incrby(dUsdKey, costUsdMicros),
       this.redis.expire(dUsdKey, 90_000, 'NX'),
@@ -122,19 +122,19 @@ export class PricingService {
   }
 
   async getBudgetStatus(userId: string, priceMonthly: number, planTier: string): Promise<BudgetStatus> {
-    const [dailyBudget, monthlyBudget, usdtRial] = await Promise.all([
-      this.dailyBudgetRial(priceMonthly),
-      this.monthlyBudgetRial(priceMonthly),
-      this.exchangeRate.getUsdtRial(),
+    const [dailyBudget, monthlyBudget, usdtToman] = await Promise.all([
+      this.dailyBudgetToman(priceMonthly),
+      this.monthlyBudgetToman(priceMonthly),
+      this.exchangeRate.getUsdtToman(),
     ])
 
     const [spentToday, spentMonth, wallet] = await Promise.all([
       this.getSpentToday(userId),
       this.getSpentMonth(userId),
-      this.prisma.wallet.findUnique({ where: { userId }, select: { balanceRial: true } }),
+      this.prisma.wallet.findUnique({ where: { userId }, select: { balanceToman: true } }),
     ])
 
-    const walletBalance = wallet?.balanceRial ?? 0
+    const walletBalance = wallet?.balanceToman ?? 0
     const ratio = dailyBudget > 0 ? spentToday / dailyBudget : 0
 
     let warningLevel: BudgetWarningLevel = 'none'
@@ -157,16 +157,16 @@ export class PricingService {
     }
 
     return {
-      dailyBudgetRial: dailyBudget,
-      spentTodayRial: spentToday,
-      remainingTodayRial: Math.max(0, dailyBudget - spentToday),
-      monthlyBudgetRial: monthlyBudget,
-      spentMonthRial: spentMonth,
-      walletBalanceRial: walletBalance,
+      dailyBudgetToman: dailyBudget,
+      spentTodayToman: spentToday,
+      remainingTodayToman: Math.max(0, dailyBudget - spentToday),
+      monthlyBudgetToman: monthlyBudget,
+      spentMonthToman: spentMonth,
+      walletBalanceToman: walletBalance,
       warningLevel,
       cascadeModel,
       upsellSuggestion,
-      usdtRial,
+      usdtToman,
     }
   }
 
@@ -177,25 +177,25 @@ export class PricingService {
       throw new HttpException(fa.chat.budgetExceeded, 429)
     }
 
-    if (status.warningLevel === 'session_limit' && status.walletBalanceRial === 0) {
+    if (status.warningLevel === 'session_limit' && status.walletBalanceToman === 0) {
       throw new HttpException(fa.budget.sessionLimit, 429)
     }
 
     return { cascadeModel: status.cascadeModel }
   }
 
-  async debitWallet(userId: string, costRial: number, description: string): Promise<boolean> {
-    const walletCost = this.walletCostForRial(costRial)
+  async debitWallet(userId: string, costToman: number, description: string): Promise<boolean> {
+    const walletCost = this.walletCostForToman(costToman)
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } })
-    if (!wallet || wallet.balanceRial < walletCost) return false
+    if (!wallet || wallet.balanceToman < walletCost) return false
 
     await this.prisma.$transaction([
       this.prisma.wallet.update({
         where: { userId },
-        data: { balanceRial: { decrement: walletCost } },
+        data: { balanceToman: { decrement: walletCost } },
       }),
       this.prisma.walletTransaction.create({
-        data: { walletId: wallet.id, type: 'DEBIT', amountRial: walletCost, description },
+        data: { walletId: wallet.id, type: 'DEBIT', amountToman: walletCost, description },
       }),
     ])
     return true
