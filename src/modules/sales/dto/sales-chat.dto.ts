@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray, IsNumber, ValidateNested, IsIn } from 'class-validator'
+import { IsString, IsOptional, IsArray, IsNumber, IsBoolean, ValidateNested, IsIn } from 'class-validator'
 import { Type } from 'class-transformer'
 
 export class SalesChatMessageDto {
@@ -60,4 +60,8 @@ export class SaveLeadDto {
   @IsOptional()
   @IsString()
   source?: string
+
+  @IsOptional()
+  @IsBoolean()
+  discountRequested?: boolean
 }

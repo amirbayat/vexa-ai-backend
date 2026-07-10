@@ -2,42 +2,28 @@ import { Injectable, HttpException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { generateText } from 'ai'
+import type { SalesBotConfig } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
-import type { SalesChatMessageDto, SalesChatDto, SaveLeadDto } from './dto/sales-chat.dto'
+import { PricingService } from '../usage/pricing.service'
+import { SalesConfigService } from './sales-config.service'
+import type { SalesChatDto, SaveLeadDto } from './dto/sales-chat.dto'
 
 const IRAN_OFFSET_MS = 3.5 * 60 * 60 * 1000
 function iranDate(): string {
   return new Date(Date.now() + IRAN_OFFSET_MS).toISOString().slice(0, 10)
 }
 
-const SALES_SYSTEM_PROMPT = `تو دستیار فروش هوشمند نیوو هستی. نیوو یک سرویس هوش مصنوعی ایرانی است که دسترسی راحت و پرداخت ریالی ارائه می‌دهد.
-
-## قوانین مطلق — هرگز نقض نکن:
-1. فقط درباره نیوو، پلن‌ها، و کاربردهای هوش مصنوعی صحبت کن
-2. اگر کاربر سوال فنی پرسید، کمک درسی خواست، متن نوشت، یا کد خواست، بگو: "این کارها بعد از اشتراک برات انجام می‌دم 😊 اول بذار بگم چطور کمکت می‌کنم"
-3. رقبا (ChatGPT مستقیم، Claude و...) را نام نبر یا مقایسه نکن
-4. قیمت‌ها را دقیق بگو — نه بالاتر، نه پایین‌تر
-5. حداکثر ۱۵ پیام رد و بدل کن — بعد حتماً به ثبت‌نام هدایت کن
-6. یک سوال در هر پیام — نه بیشتر
-7. از ایموجی‌های مناسب استفاده کن ولی زیاده‌روی نکن
-
-## جریان مکالمه:
-- مرحله ۱ (پیام ۱-۳): کشف — شغل، سن، کارهای روزانه
-- مرحله ۲ (پیام ۴-۶): درد — چالش اصلی، وقت تلف‌شده
-- مرحله ۳ (پیام ۷-۱۱): ارزش — ۳-۵ use case شخصی‌سازی‌شده برای این کاربر خاص
-- مرحله ۴ (پیام ۱۲-۱۵): توصیه یک پلن مشخص با دلیل + دعوت به ثبت‌نام
-
-## پلن‌ها:
-- رایگان: ۵ پیام در روز، مدل GPT-4o mini، بدون هزینه — برای تست اولیه
-- اکو: ۵۰ پیام در روز، GPT-4o mini، ۱۹۹,۰۰۰ تومان ماهانه — برای استفاده روزانه متوسط
-- پلاس: نامحدود، GPT-4o و GPT-4 Turbo (قوی‌ترین مدل‌ها)، ۴۹۹,۰۰۰ تومان ماهانه — برای استفاده حرفه‌ای و روزانه سنگین
-
-## لحن و سبک:
-- صمیمی، مثل یه دوست متخصص که دلسوزانه کمک می‌کند
-- پیام‌های کوتاه — حداکثر ۳-۴ جمله
-- فارسی محاوره‌ای و ساده — نه رسمی
-- وقتی use case می‌دهی: مشخص و قابل تصور باش، نه کلی`
+interface DailyUsageDelta {
+  messageCount?: number
+  tokensInput?: number
+  tokensOutput?: number
+  costToman?: number
+  costUsdMicros?: number
+  sessionsStarted?: number
+  discountOffersShown?: number
+  phonesCaptured?: number
+}
 
 @Injectable()
 export class SalesService {
@@ -47,6 +33,8 @@ export class SalesService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly config: ConfigService,
+    private readonly salesConfig: SalesConfigService,
+    private readonly pricingService: PricingService,
   ) {
     this.provider = createOpenAICompatible({
       name: 'liara',
@@ -55,25 +43,35 @@ export class SalesService {
     })
   }
 
-  async chat(dto: SalesChatDto, ip: string): Promise<{ reply: string; isDone: boolean; recommendedPlan?: string }> {
+  async chat(
+    dto: SalesChatDto,
+    ip: string,
+  ): Promise<{ reply: string; isDone: boolean; recommendedPlan?: string; offerDiscount?: boolean }> {
     // rate limit: 30 requests per hour per IP
     const rlKey = `sales:rl:${ip}:${iranDate()}`
     const count = await this.redis.incr(rlKey)
     if (count === 1) await this.redis.expire(rlKey, 3600)
     if (count > 30) throw new HttpException('تعداد درخواست بیش از حد مجاز است', 429)
 
-    const messages = dto.messages.slice(-14)  // keep last 14 to stay within context
-    const isDone = messages.length >= 14
+    const botConfig = await this.salesConfig.getConfig()
+    const messages = dto.messages.slice(-botConfig.maxMessages)
+    const isDone = messages.length >= botConfig.maxMessages
+    const isFirstMessage = dto.messages.length <= 1
 
     let text: string
+    let inputTokens = 0
+    let outputTokens = 0
     try {
       const result = await generateText({
-        model: this.provider('openai/gpt-4o-mini'),
-        system: SALES_SYSTEM_PROMPT,
+        model: this.provider(botConfig.model),
+        system: botConfig.contextMd,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
         maxOutputTokens: 400,
       })
       text = result.text
+      const usage = await result.usage
+      inputTokens = usage.inputTokens ?? 0
+      outputTokens = usage.outputTokens ?? 0
     } catch {
       return {
         reply: 'سرویس هوش مصنوعی در حال حاضر در دسترس نیست. چند دقیقه دیگر دوباره امتحان کن 🙏',
@@ -82,8 +80,31 @@ export class SalesService {
     }
 
     const recommendedPlan = this.extractPlan(text)
+    const cost = await this.pricingService.calcCost(inputTokens, outputTokens, botConfig.model)
 
-    return { reply: text, isDone, ...(recommendedPlan ? { recommendedPlan } : {}) }
+    // آنالیتیکس نباید در صورت شکست، پاسخ به کاربر را fail کند
+    await this.recordDailyUsage({
+      messageCount: 1,
+      tokensInput: inputTokens,
+      tokensOutput: outputTokens,
+      costToman: cost.costToman,
+      costUsdMicros: cost.costUsdMicros,
+      sessionsStarted: isFirstMessage ? 1 : 0,
+    }).catch(() => {})
+
+    const offerDiscount = await this.maybeOfferDiscount(
+      dto.sessionId,
+      botConfig,
+      dto.messages.length,
+      recommendedPlan,
+    )
+
+    return {
+      reply: text,
+      isDone,
+      ...(recommendedPlan ? { recommendedPlan } : {}),
+      ...(offerDiscount ? { offerDiscount: true } : {}),
+    }
   }
 
   async saveLead(dto: SaveLeadDto): Promise<{ id: string }> {
@@ -97,6 +118,7 @@ export class SalesService {
       ...(dto.interests   !== undefined && { interests: dto.interests }),
       ...(dto.chatHistory !== undefined && { chatHistory: dto.chatHistory as object[] }),
       ...(dto.recommendedPlan !== undefined && { recommendedPlan: dto.recommendedPlan }),
+      ...(dto.discountRequested !== undefined && { discountOffered: dto.discountRequested }),
       source: dto.source ?? 'pricing_page',
     }
 
@@ -106,7 +128,65 @@ export class SalesService {
       update: base,
     })
 
+    if (dto.phone) {
+      await this.recordDailyUsage({ phonesCaptured: 1 }).catch(() => {})
+    }
+
     return { id: lead.id }
+  }
+
+  // تشخیص قطعی و بدون‌هزینه‌ی AI اضافه (docs/PRD-sales-bot-dashboard.md بخش ۸.۱):
+  // مکالمه طولانی شده ولی هنوز به سمت یک پلن مشخص نرفته → سیگنال دودلی/نبود قصد خرید فوری.
+  private async maybeOfferDiscount(
+    sessionId: string,
+    botConfig: SalesBotConfig,
+    messageCount: number,
+    recommendedPlan: string | undefined,
+  ): Promise<boolean> {
+    if (!botConfig.discountEnabled) return false
+    if (messageCount < botConfig.discountMinMessages) return false
+    if (recommendedPlan) return false // در حال همگرایی به یک تصمیم — نیازی به بهانه‌ی تخفیف نیست
+
+    const lead = await this.prisma.leadProfile.findUnique({ where: { sessionId } })
+    if (lead?.phone || lead?.discountOffered) return false
+
+    await this.prisma.leadProfile.upsert({
+      where: { sessionId },
+      create: { sessionId, discountOffered: true, source: 'discount_offer' },
+      update: { discountOffered: true },
+    })
+    await this.recordDailyUsage({ discountOffersShown: 1 }).catch(() => {})
+
+    return true
+  }
+
+  private async recordDailyUsage(delta: DailyUsageDelta): Promise<void> {
+    const date = new Date(iranDate())
+    const data = {
+      messageCount: delta.messageCount ?? 0,
+      tokensInput: delta.tokensInput ?? 0,
+      tokensOutput: delta.tokensOutput ?? 0,
+      costToman: delta.costToman ?? 0,
+      costUsdMicros: delta.costUsdMicros ?? 0,
+      sessionsStarted: delta.sessionsStarted ?? 0,
+      discountOffersShown: delta.discountOffersShown ?? 0,
+      phonesCaptured: delta.phonesCaptured ?? 0,
+    }
+
+    await this.prisma.salesBotDailyUsage.upsert({
+      where: { date },
+      create: { date, ...data },
+      update: {
+        messageCount: { increment: data.messageCount },
+        tokensInput: { increment: data.tokensInput },
+        tokensOutput: { increment: data.tokensOutput },
+        costToman: { increment: data.costToman },
+        costUsdMicros: { increment: data.costUsdMicros },
+        sessionsStarted: { increment: data.sessionsStarted },
+        discountOffersShown: { increment: data.discountOffersShown },
+        phonesCaptured: { increment: data.phonesCaptured },
+      },
+    })
   }
 
   private extractPlan(text: string): string | undefined {

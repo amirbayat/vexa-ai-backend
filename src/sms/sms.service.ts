@@ -36,9 +36,12 @@ export class SmsService {
   private readonly maxRetries = 2
   private readonly retryDelayMs = 800
 
+  private readonly senderLine: string
+
   constructor(private readonly config: ConfigService) {
     const apiKey = this.config.get<string>('KAVENEGAR_API_KEY', '')
     this.template = this.config.get<string>('KAVENEGAR_TEMPLATE', 'registerverify')
+    this.senderLine = this.config.get<string>('KAVENEGAR_SENDER_LINE', '')
     this.devMode = this.config.get<string>('SEND_SMS', 'false') !== 'true'
 
     if (!this.devMode) {
@@ -49,6 +52,12 @@ export class SmsService {
   private callVerifyLookup(params: Record<string, unknown>): Promise<{ status: number; response: any }> {
     return new Promise(resolve => {
       this.api.VerifyLookup(params, (response: any, status: number) => resolve({ status, response }))
+    })
+  }
+
+  private callSend(params: Record<string, unknown>): Promise<{ status: number; response: any }> {
+    return new Promise(resolve => {
+      this.api.Send(params, (response: any, status: number) => resolve({ status, response }))
     })
   }
 
@@ -103,5 +112,25 @@ export class SmsService {
     }
 
     await this.sendWithRetry({ receptor, template, ...tokens }, `SMS (${template})`)
+  }
+
+  /**
+   * ارسال متن آزاد از خط اختصاصی (KAVENEGAR_SENDER_LINE) — برخلاف sendOtp/sendByTemplate
+   * که از VerifyLookup (الگوی از پیش تأییدشده) استفاده می‌کنند، اینجا برای پیام‌های دستی
+   * ادمین به لیدهای ربات فروش (docs/PRD-sales-bot-dashboard.md بخش ۱۰) از Kavenegar's Send
+   * API استفاده می‌شود که متن دلخواه را از یک خط تأییدشده ارسال می‌کند.
+   */
+  async sendFreeText(receptor: string, message: string): Promise<void> {
+    if (this.devMode) {
+      this.logger.warn(`📩 SMS (free-text) ══ ${receptor} → ${message}`)
+      return
+    }
+
+    const { status, response } = await this.callSend({ receptor, message, sender: this.senderLine })
+    if (status !== 200) {
+      this.logger.error(`Kavenegar Send error — status: ${status}`, response)
+      throw new InternalServerErrorException(fa.sms.sendFailed)
+    }
+    this.logger.log(`Free-text SMS sent to ${receptor}`)
   }
 }

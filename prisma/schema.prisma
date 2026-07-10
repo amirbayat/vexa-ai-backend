@@ -481,8 +481,8 @@ model ModelFeedbackSummary {
 }
 
 model LeadProfile {
-  id              String   @id @default(uuid())
-  sessionId       String?  @unique
+  id              String             @id @default(uuid())
+  sessionId       String?            @unique
   phone           String?
   name            String?
   age             Int?
@@ -491,10 +491,55 @@ model LeadProfile {
   interests       Json?
   chatHistory     Json?
   recommendedPlan String?
-  source          String   @default("pricing_page")
-  createdAt       DateTime @default(now())
+  source          String             @default("pricing_page")
+  discountOffered Boolean            @default(false) // docs/PRD-sales-bot-dashboard.md بخش ۸
+  followUpStatus  LeadFollowUpStatus @default(NEW)
+  guideContentMd  String?            @db.Text // فاز ۲ — صفحه راهنمای AI شخصی‌سازی‌شده
+  guideSentAt     DateTime?
+  createdAt       DateTime           @default(now())
 
   @@map("lead_profiles")
+}
+
+enum LeadFollowUpStatus {
+  NEW
+  CONTACTED
+  CONVERTED
+  DECLINED
+}
+
+// ─── Sales Bot (docs/PRD-sales-bot-dashboard.md) ───────────────────────────────
+
+// singleton — دقیقاً یک ردیف، مشابه الگوی ModelRoutingConfig
+model SalesBotConfig {
+  id                  String   @id @default("singleton")
+  contextMd           String   @db.Text
+  model               String   @default("openai/gpt-5.4-mini")
+  maxMessages         Int      @default(15)
+  discountEnabled     Boolean  @default(true)
+  discountMinMessages Int      @default(6)
+  discountPromptText  String   @db.Text
+  updatedAt           DateTime @updatedAt
+
+  @@map("sales_bot_config")
+}
+
+// رول‌آپ روزانه برای آنالیتیکس اختصاصی ربات فروش — مشابه الگوی DailyUsage
+model SalesBotDailyUsage {
+  id                  String   @id @default(uuid())
+  date                DateTime @db.Date
+  messageCount        Int      @default(0)
+  tokensInput         Int      @default(0)
+  tokensOutput        Int      @default(0)
+  costToman           Int      @default(0)
+  costUsdMicros       Int      @default(0)
+  sessionsStarted     Int      @default(0)
+  discountOffersShown Int      @default(0)
+  phonesCaptured      Int      @default(0)
+
+  @@unique([date])
+  @@index([date])
+  @@map("sales_bot_daily_usage")
 }
 
 // ─── Usage Analytics ────────────────────────────────────────────────────────────
