@@ -114,6 +114,10 @@ export class SalesService {
       recommendedPlan,
     )
 
+    // تاریخچه‌ی مکالمه برای ادمین (بخش «تاریخچه» در /admin/sales-bot) — عمداً overwrite
+    // می‌شود، نه append، چون فرانت هر بار کل تاریخچه‌ی تاکنون را در dto.messages می‌فرستد.
+    this.saveChatSession(dto.sessionId, dto.messages, text).catch(() => {})
+
     return {
       reply: text,
       isDone,
@@ -201,6 +205,19 @@ export class SalesService {
         discountOffersShown: { increment: data.discountOffersShown },
         phonesCaptured: { increment: data.phonesCaptured },
       },
+    })
+  }
+
+  private async saveChatSession(
+    sessionId: string,
+    priorMessages: { role: 'user' | 'assistant'; content: string }[],
+    assistantReply: string,
+  ): Promise<void> {
+    const messages = [...priorMessages, { role: 'assistant' as const, content: assistantReply }]
+    await this.prisma.salesChatSession.upsert({
+      where: { sessionId },
+      create: { sessionId, messages, messageCount: messages.length },
+      update: { messages, messageCount: messages.length, lastMessageAt: new Date() },
     })
   }
 

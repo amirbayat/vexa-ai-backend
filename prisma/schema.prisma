@@ -390,18 +390,27 @@ enum ModelTier {
   COMPLEX
 }
 
+// چت‌محور (تولید متن) در برابر embedding — docs/PRD-sales-kb-rag-and-plan-context.md.
+// جدا نگه‌داشتن این دو نوع در همان جدول AiModel لازم است تا مدل‌های embedding در
+// دراپ‌داون‌های چت (پلن‌ها، مسیریاب مدل، کاتالوگ عمومی) سهواً انتخاب‌پذیر نشوند.
+enum AiModelType {
+  CHAT
+  EMBEDDING
+}
+
 model AiModel {
-  id              String    @id @default(uuid())
-  name            String    @unique
+  id              String      @id @default(uuid())
+  name            String      @unique
   displayName     String
   provider        String
-  inputPricePerM  Float     @default(0)
-  outputPricePerM Float     @default(0)
-  supportsVision  Boolean   @default(false)
-  isActive        Boolean   @default(true)
-  sortOrder       Int       @default(0)
-  tier            ModelTier @default(MEDIUM)
-  createdAt       DateTime  @default(now())
+  modelType       AiModelType @default(CHAT)
+  inputPricePerM  Float       @default(0)
+  outputPricePerM Float       @default(0)
+  supportsVision  Boolean     @default(false)
+  isActive        Boolean     @default(true)
+  sortOrder       Int         @default(0)
+  tier            ModelTier   @default(MEDIUM)
+  createdAt       DateTime    @default(now())
 
   // شمارش دقیق توکن — برای مدل‌های OpenAI-family یک tokenizer واقعی داریم؛
   // برای بقیه‌ی پروایدرها (Claude، Grok، ...) که tokenizer آفلاین ندارند،
@@ -515,6 +524,7 @@ model SalesBotConfig {
   id                  String   @id @default("singleton")
   contextMd           String   @db.Text
   model               String   @default("openai/gpt-5.4-mini")
+  embeddingModel      String   @default("openai/text-embedding-3-small") // docs/PRD-sales-kb-rag-and-plan-context.md
   maxMessages         Int      @default(15)
   discountEnabled     Boolean  @default(true)
   discountMinMessages Int      @default(6)
@@ -526,20 +536,40 @@ model SalesBotConfig {
 
 // رول‌آپ روزانه برای آنالیتیکس اختصاصی ربات فروش — مشابه الگوی DailyUsage
 model SalesBotDailyUsage {
-  id                  String   @id @default(uuid())
-  date                DateTime @db.Date
-  messageCount        Int      @default(0)
-  tokensInput         Int      @default(0)
-  tokensOutput        Int      @default(0)
-  costToman           Int      @default(0)
-  costUsdMicros       Int      @default(0)
-  sessionsStarted     Int      @default(0)
-  discountOffersShown Int      @default(0)
-  phonesCaptured      Int      @default(0)
+  id                     String   @id @default(uuid())
+  date                   DateTime @db.Date
+  messageCount           Int      @default(0)
+  tokensInput            Int      @default(0)
+  tokensOutput           Int      @default(0)
+  costToman              Int      @default(0)
+  costUsdMicros          Int      @default(0)
+  sessionsStarted        Int      @default(0)
+  discountOffersShown    Int      @default(0)
+  phonesCaptured         Int      @default(0)
+  // هزینه‌ی embedding — جدا از هزینه‌ی چت بالا (docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۱۲)
+  embeddingCalls         Int      @default(0)
+  embeddingTokens        Int      @default(0)
+  embeddingCostToman     Int      @default(0)
+  embeddingCostUsdMicros Int      @default(0)
 
   @@unique([date])
   @@index([date])
   @@map("sales_bot_daily_usage")
+}
+
+// اسنپ‌شات کامل مکالمه‌ی هر سشن ربات فروش — برای دیدن تاریخچه در ادمین و ساخت
+// نمونه‌ی جدید پایگاه دانش از یک مکالمه‌ی واقعی. روی هر پیام overwrite می‌شود
+// (فرانت هر بار کل تاریخچه را می‌فرستد، پس همیشه آخرین snapshot کامل است).
+model SalesChatSession {
+  id            String   @id @default(uuid())
+  sessionId     String   @unique
+  messages      Json // { role: 'user' | 'assistant', content: string }[]
+  messageCount  Int      @default(0)
+  createdAt     DateTime @default(now())
+  lastMessageAt DateTime @default(now())
+
+  @@index([lastMessageAt])
+  @@map("sales_chat_sessions")
 }
 
 // پایگاه دانش فروش برای بازیابی معنایی (RAG) — docs/PRD-sales-kb-rag-and-plan-context.md بخش الف

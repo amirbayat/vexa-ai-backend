@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer'
 import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator'
-import { MODEL_TIERS, TOKENIZER_FAMILIES } from './create-model.dto'
+import { MODEL_TIERS, MODEL_TYPES, TOKENIZER_FAMILIES } from './create-model.dto'
 
 export class UpdateModelDto {
   @IsOptional()
@@ -14,6 +14,10 @@ export class UpdateModelDto {
   @IsOptional()
   @IsString()
   provider?: string
+
+  @IsOptional()
+  @IsIn(MODEL_TYPES)
+  modelType?: (typeof MODEL_TYPES)[number]
 
   @IsOptional()
   @Type(() => Number)

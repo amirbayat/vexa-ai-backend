@@ -3,6 +3,7 @@ import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-vali
 
 export const MODEL_TIERS = ['SIMPLE', 'MEDIUM', 'COMPLEX'] as const
 export const TOKENIZER_FAMILIES = ['o200k_base', 'cl100k_base', 'approximate'] as const
+export const MODEL_TYPES = ['CHAT', 'EMBEDDING'] as const
 
 export class CreateModelDto {
   @IsString()
@@ -13,6 +14,10 @@ export class CreateModelDto {
 
   @IsString()
   provider!: string
+
+  @IsOptional()
+  @IsIn(MODEL_TYPES)
+  modelType?: (typeof MODEL_TYPES)[number]
 
   @Type(() => Number)
   @IsNumber()

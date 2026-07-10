@@ -115,6 +115,7 @@ export class ModelRouterService {
       where: {
         name: { in: input.allowedModels },
         isActive: true,
+        modelType: 'CHAT', // مدل‌های embedding هرگز نباید برای تولید پاسخ چت انتخاب شوند
         ...(input.hasImages ? { supportsVision: true } : {}),
       },
       orderBy: { sortOrder: 'asc' },

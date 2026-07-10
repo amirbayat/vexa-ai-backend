@@ -16,6 +16,39 @@ export interface SalesBotAnalyticsOverview {
   discountOffersShown: number
   phonesCaptured: number
   discountConversionRate: number | null // phonesCaptured / discountOffersShown
+  embeddingCalls: number
+  embeddingTokens: number
+  embeddingCostToman: number
+  embeddingCostUsd: number
+}
+
+export interface SalesKbDraftEntry {
+  kind: 'EXAMPLE'
+  label: string
+  tags: string[]
+  userMessage: string
+  assistantReply: string
+}
+
+// هر پیام کاربر که بلافاصله بعدش پاسخ دستیار آمده را به یک نمونه‌ی پیشنهادی برای
+// پایگاه دانش تبدیل می‌کند — docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۱۱.
+function pairTurnsToKbDrafts(
+  sessionId: string,
+  messages: { role: string; content: string }[],
+): SalesKbDraftEntry[] {
+  const drafts: SalesKbDraftEntry[] = []
+  for (let i = 0; i < messages.length - 1; i++) {
+    if (messages[i].role === 'user' && messages[i + 1].role === 'assistant') {
+      drafts.push({
+        kind: 'EXAMPLE',
+        label: `از تاریخچه — ${sessionId.slice(0, 8)}`,
+        tags: ['from-history'],
+        userMessage: messages[i].content,
+        assistantReply: messages[i + 1].content,
+      })
+    }
+  }
+  return drafts
 }
 
 export interface SalesBotAnalyticsPoint {
@@ -59,6 +92,37 @@ export class SalesAdminService {
     return this.salesKb.testRetrieval(sampleMessage)
   }
 
+  recomputeKbEmbeddings() {
+    return this.salesKb.recomputeAll()
+  }
+
+  // ─── تاریخچه‌ی مکالمات — docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۱۱ ──
+  async listChatSessions(page: number, limit: number) {
+    const [items, total] = await Promise.all([
+      this.prisma.salesChatSession.findMany({
+        orderBy: { lastMessageAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.salesChatSession.count(),
+    ])
+    return { items, total, page, limit }
+  }
+
+  async exportChatSessionsKb(sessionId?: string): Promise<{ entries: SalesKbDraftEntry[] }> {
+    if (sessionId) {
+      const session = await this.prisma.salesChatSession.findUnique({ where: { sessionId } })
+      if (!session) throw new NotFoundException('سشن پیدا نشد')
+      return { entries: pairTurnsToKbDrafts(session.sessionId, session.messages as { role: string; content: string }[]) }
+    }
+
+    const sessions = await this.prisma.salesChatSession.findMany({ orderBy: { lastMessageAt: 'desc' } })
+    const entries = sessions.flatMap(s =>
+      pairTurnsToKbDrafts(s.sessionId, s.messages as { role: string; content: string }[]),
+    )
+    return { entries }
+  }
+
   getConfig() {
     return this.salesConfig.getConfig()
   }
@@ -82,6 +146,10 @@ export class SalesAdminService {
         sessionsStarted: acc.sessionsStarted + r.sessionsStarted,
         discountOffersShown: acc.discountOffersShown + r.discountOffersShown,
         phonesCaptured: acc.phonesCaptured + r.phonesCaptured,
+        embeddingCalls: acc.embeddingCalls + r.embeddingCalls,
+        embeddingTokens: acc.embeddingTokens + r.embeddingTokens,
+        embeddingCostToman: acc.embeddingCostToman + r.embeddingCostToman,
+        embeddingCostUsdMicros: acc.embeddingCostUsdMicros + r.embeddingCostUsdMicros,
       }),
       {
         totalMessages: 0,
@@ -92,6 +160,10 @@ export class SalesAdminService {
         sessionsStarted: 0,
         discountOffersShown: 0,
         phonesCaptured: 0,
+        embeddingCalls: 0,
+        embeddingTokens: 0,
+        embeddingCostToman: 0,
+        embeddingCostUsdMicros: 0,
       },
     )
 
@@ -108,6 +180,10 @@ export class SalesAdminService {
       discountConversionRate: totals.discountOffersShown > 0
         ? totals.phonesCaptured / totals.discountOffersShown
         : null,
+      embeddingCalls: totals.embeddingCalls,
+      embeddingTokens: totals.embeddingTokens,
+      embeddingCostToman: totals.embeddingCostToman,
+      embeddingCostUsd: totals.embeddingCostUsdMicros / 1_000_000,
     }
   }
 

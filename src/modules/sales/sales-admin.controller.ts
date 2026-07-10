@@ -84,4 +84,20 @@ export class SalesAdminController {
   testKbRetrieval(@Body() dto: TestRetrievalDto) {
     return this.salesAdminService.testKbRetrieval(dto.sampleMessage)
   }
+
+  @Post('kb/recompute-embeddings')
+  recomputeKbEmbeddings() {
+    return this.salesAdminService.recomputeKbEmbeddings()
+  }
+
+  // ─── تاریخچه‌ی مکالمات — docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۱۱ ──
+  @Get('sessions')
+  listChatSessions(@Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.salesAdminService.listChatSessions(page ? Number(page) : 1, limit ? Number(limit) : 20)
+  }
+
+  @Get('sessions/export')
+  exportChatSessionsKb(@Query('sessionId') sessionId?: string) {
+    return this.salesAdminService.exportChatSessionsKb(sessionId)
+  }
 }

@@ -56,7 +56,16 @@ export const DEFAULT_DISCOUNT_PROMPT =
   'به نظر می‌رسه هنوز مطمئن نیستی — یه کد تخفیف ویژه برات کنار بذارم؟ فقط شماره‌ت رو بده 🎁'
 
 export type UpdatableSalesBotConfig = Partial<
-  Pick<SalesBotConfig, 'contextMd' | 'model' | 'maxMessages' | 'discountEnabled' | 'discountMinMessages' | 'discountPromptText'>
+  Pick<
+    SalesBotConfig,
+    | 'contextMd'
+    | 'model'
+    | 'embeddingModel'
+    | 'maxMessages'
+    | 'discountEnabled'
+    | 'discountMinMessages'
+    | 'discountPromptText'
+  >
 >
 
 /**

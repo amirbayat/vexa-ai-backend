@@ -13,6 +13,10 @@ export class UpdateSalesBotConfigDto {
   model?: string
 
   @IsOptional()
+  @IsString()
+  embeddingModel?: string
+
+  @IsOptional()
   @IsInt()
   @Min(1)
   maxMessages?: number
