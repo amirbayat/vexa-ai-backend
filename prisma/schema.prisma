@@ -525,6 +525,7 @@ model SalesBotConfig {
   contextMd           String   @db.Text
   model               String   @default("openai/gpt-5.4-mini")
   embeddingModel      String   @default("openai/text-embedding-3-small") // docs/PRD-sales-kb-rag-and-plan-context.md
+  maxOutputTokens     Int      @default(800) // قبلاً هاردکد 400 در sales.service.ts — حالا از ادمین قابل‌تنظیم
   maxMessages         Int      @default(15)
   discountEnabled     Boolean  @default(true)
   discountMinMessages Int      @default(6)
