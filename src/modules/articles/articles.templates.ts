@@ -122,7 +122,7 @@ function renderLayout({ title, description, ogImage, canonicalPath, bodyHtml }: 
       <a class="brand" href="/">نیو<span>و</span></a>
       <nav>
         <a href="/blog">مقالات</a>
-        <a href="/pricing">پلن‌ها</a>
+        <a href="/#pricing">پلن‌ها</a>
         <a href="/login">ورود</a>
       </nav>
     </div>
