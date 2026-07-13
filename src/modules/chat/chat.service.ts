@@ -496,9 +496,20 @@ export class ChatService {
       this.logger.warn(`generateTitle: model returned empty title (conversation=${conversationId})`)
       return null
     } catch (err) {
-      this.logger.error(
-        `generateTitle failed (conversation=${conversationId}, model=${modelId}): ${err instanceof Error ? err.message : String(err)}`,
-      )
+      if (APICallError.isInstance(err)) {
+        // خطای واقعی سمت Liara/provider — statusCode و responseBody دقیقاً همون چیزیه که
+        // سرور برگردونده، نه فقط پیام خطای کلی «Internal Server Error» AI SDK
+        this.logger.error(
+          `generateTitle failed (conversation=${conversationId}, model=${modelId}) — API call error: ` +
+            `statusCode=${err.statusCode} url=${err.url} isRetryable=${err.isRetryable} ` +
+            `responseBody=${err.responseBody ?? '(none)'} requestBodyValues=${JSON.stringify(err.requestBodyValues)}`,
+        )
+      } else {
+        this.logger.error(
+          `generateTitle failed (conversation=${conversationId}, model=${modelId}): ${err instanceof Error ? err.message : String(err)}`,
+          err instanceof Error ? err.stack : undefined,
+        )
+      }
       return null
     }
   }
