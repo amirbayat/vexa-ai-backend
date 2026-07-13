@@ -422,11 +422,20 @@ export class ChatService {
           : []),
       ])
 
-      // fire-and-forget — عنوان‌سازی/خلاصه‌سازی نباید کاربر را برای پایان استریم معطل کند
+      // فقط برای اولین پیام مکالمه: منتظر عنوان می‌مانیم (نه fire-and-forget) تا همان لحظه با یک
+      // SSE event به فرانت فرستاده شود — قبلاً fire-and-forget بود و چون invalidate کوئری‌ها روی
+      // [DONE] زودتر از این generateText async کامل می‌شد، فرانت تا reload بعدی عنوان تازه را نمی‌دید.
+      // تنها هزینه: استریم کمی بعد از پایان متن قابل‌مشاهده بسته می‌شود (یک تولید ۴۰ توکنی)،
+      // و فقط برای پیام اول هر مکالمه — نه هر پیام.
       if (!conversation.title && isFirstMessage) {
-        this.generateTitle(conversationId, fullContent, modelId).catch(() => {})
+        const title = await this.generateTitle(conversationId, fullContent, modelId)
+        if (title) {
+          res.write(`data: ${JSON.stringify({ info: 'title', title })}\n\n`)
+        }
       }
 
+      // خلاصه‌سازی همچنان fire-and-forget می‌ماند (می‌تواند طول بکشد و روی هر پیام چک می‌شود، نه
+      // فقط اولی) — عنوانِ ناشی از خلاصه‌سازی با invalidate پیام بعدی به‌روز می‌شود، نه این‌جا
       const tokensSinceSummaryText = recentMessages.map(m => m.content).join('\n') + fullContent
       const tokensSinceSummary = await this.tokenEstimator.estimateTokens(tokensSinceSummaryText, modelId)
       if (tokensSinceSummary > chatConfig.summaryTriggerTokens) {
@@ -459,11 +468,13 @@ export class ChatService {
   // sourceText یا پاسخ اول هوش مصنوعی است (شروع مکالمه) یا یک خلاصه‌ی مکالمه (بعد از
   // خلاصه‌سازی مبتنی بر توکن — docs/PRD-chat-context-and-summarization.md بخش ۳.۴) —
   // در حالت دوم عنوان قبلی بی‌قیدوشرط بازنویسی می‌شود تا با تحول مکالمه هم‌راستا بماند.
+  // برمی‌گرداند: عنوان تازه (اگر ساخته و ذخیره شد) یا null (خالی/شکست) — streamChat از این
+  // مقدار برگشتی برای فرستادن یک SSE event به فرانت استفاده می‌کند تا عنوان بدون reload آپدیت شود
   private async generateTitle(
     conversationId: string,
     sourceText: string,
     modelId: string,
-  ): Promise<void> {
+  ): Promise<string | null> {
     try {
       const { text } = await generateText({
         model: this.provider(modelId),
@@ -480,15 +491,15 @@ export class ChatService {
           where: { id: conversationId },
           data: { title },
         })
-      } else {
-        this.logger.warn(`generateTitle: model returned empty title (conversation=${conversationId})`)
+        return title
       }
+      this.logger.warn(`generateTitle: model returned empty title (conversation=${conversationId})`)
+      return null
     } catch (err) {
-      // fire-and-forget از streamChat — قبلاً بی‌صدا catch می‌شد؛ عنوان فقط یک‌بار (پیام اول
-      // مکالمه) تلاش می‌شود، پس اگر همین یک تلاش شکست بخورد دیگر تا خلاصه‌سازی بعدی retry نمی‌شود
       this.logger.error(
         `generateTitle failed (conversation=${conversationId}, model=${modelId}): ${err instanceof Error ? err.message : String(err)}`,
       )
+      return null
     }
   }
 
