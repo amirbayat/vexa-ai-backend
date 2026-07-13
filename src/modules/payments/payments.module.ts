@@ -6,9 +6,10 @@ import { ZarinpalGateway } from './gateways/zarinpal.gateway'
 import { VandarGateway } from './gateways/vandar.gateway'
 import { ZibalGateway } from './gateways/zibal.gateway'
 import { UsageModule } from '../usage/usage.module'
+import { GrowthModule } from '../growth/growth.module'
 
 @Module({
-  imports: [UsageModule],
+  imports: [UsageModule, GrowthModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, PaymentGatewayRegistry, ZarinpalGateway, VandarGateway, ZibalGateway],
 })

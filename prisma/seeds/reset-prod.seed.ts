@@ -12,6 +12,7 @@
 
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@prisma/client'
+import { generateShortCode } from '../../src/common/utils/generate-code'
 
 const adapter = new PrismaPg({ connectionString: process.env['DATABASE_URL'] })
 const prisma = new PrismaClient({ adapter })
@@ -151,6 +152,7 @@ async function main() {
       name: 'ادمین وکسا',
       role: 'ADMIN',
       isActive: true,
+      referralCode: generateShortCode(),
     },
   })
   console.log(`  ✓ Admin user: ${admin.phone} (id: ${admin.id})`)

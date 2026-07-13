@@ -1,8 +1,10 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { PaymentProvider } from '@prisma/client'
+import { PaymentProvider, DiscountSource } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { TokenService } from '../usage/token.service'
+import { DiscountCodeService } from '../growth/discount-code.service'
+import { GrowthConfigService } from '../growth/growth-config.service'
 import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry'
 import { PaymentGateway } from './gateways/payment-gateway.interface'
 import { fa } from '../../i18n/fa'
@@ -18,6 +20,8 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly registry: PaymentGatewayRegistry,
     private readonly tokenService: TokenService,
+    private readonly discountCodeService: DiscountCodeService,
+    private readonly growthConfigService: GrowthConfigService,
     private readonly config: ConfigService,
   ) {}
 
@@ -26,6 +30,15 @@ export class PaymentsService {
     if (!plan) throw new NotFoundException(fa.plans.notFound)
     if (!plan.isActive) throw new BadRequestException(fa.plans.notActive)
 
+    // docs/PRD-growth-traction-features.md بخش ۵.۲ — کد تخفیف اختیاری
+    let finalAmount = plan.priceMonthly
+    let discountCodeId: string | null = null
+    if (dto.discountCode) {
+      const code = await this.discountCodeService.findValidCode(dto.discountCode, userId)
+      discountCodeId = code.id
+      finalAmount = Math.round(plan.priceMonthly * (1 - code.discountPercent / 100))
+    }
+
     const gateway = this.registry.resolve(dto.gateway)
     // نکته: این باید آدرس خودِ بک‌اند باشد (API_URL)، نه فرانت (APP_URL) —
     // چون این آدرس رو مستقیم درگاه پرداخت صدا می‌زند. روی پروداکشن این دو دامنه‌ی متفاوتند
@@ -33,17 +46,24 @@ export class PaymentsService {
     // به SPA فرانت می‌خورد و به‌جای verify شدن، به‌خاطر catch-all روتر به صفحه‌ی اصلی می‌رود.
     const callbackUrl = `${this.config.get('API_URL')}/api/v1/payments/callback/${gateway.name.toLowerCase()}`
 
-    this.logger.log(`initiate: gateway=${gateway.name} callbackUrl=${callbackUrl}`)
+    this.logger.log(`initiate: gateway=${gateway.name} callbackUrl=${callbackUrl} finalAmount=${finalAmount}`)
 
     // مرز تبدیل: همه‌جای پروژه تومان است، ولی API درگاه‌های پرداخت (زرین‌پال/وندار/زیبال) فقط ریال قبول می‌کند
     const { providerRef, paymentUrl } = await gateway.createPayment({
-      amount: plan.priceMonthly * 10,
+      amount: finalAmount * 10,
       description: fa.payment.description(plan.name),
       callbackUrl,
     })
 
     await this.prisma.payment.create({
-      data: { userId, planId: dto.planId, amount: plan.priceMonthly, provider: gateway.name, providerRef },
+      data: {
+        userId,
+        planId: dto.planId,
+        amount: finalAmount,
+        provider: gateway.name,
+        providerRef,
+        ...(discountCodeId ? { discountCodeId } : {}),
+      },
     })
 
     this.logger.log(`initiate: created payment providerRef=${providerRef} paymentUrl=${paymentUrl}`)
@@ -113,6 +133,15 @@ export class PaymentsService {
     const now = new Date()
     const periodEnd = new Date(now.getTime() + SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000)
 
+    // docs/PRD-growth-traction-features.md بخش ۶.۳ — پاداش معرفی فقط روی «اولین پرداخت موفق»
+    // دوستِ معرفی‌شده فعال می‌شود؛ همین‌جا (قبل از تراکنش) چک می‌کنیم، نه بعدش، چون این پرداخت
+    // هنوز PENDING است و شمارش COMPLETED قبلی‌ها را مخدوش نمی‌کند
+    const isReferredUser = Boolean(payment.user.referredByUserId)
+    const priorCompletedCount = isReferredUser
+      ? await this.prisma.payment.count({ where: { userId: payment.userId, status: 'COMPLETED' } })
+      : 0
+    const isFirstCompletedPayment = priorCompletedCount === 0
+
     const invoice = await this.prisma.$transaction(async (tx) => {
       await tx.payment.update({
         where: { providerRef },
@@ -138,6 +167,10 @@ export class PaymentsService {
         },
       })
 
+      if (payment.discountCodeId) {
+        await this.discountCodeService.recordRedemption(tx, payment.discountCodeId, payment.userId, payment.id)
+      }
+
       return tx.invoice.create({
         data: {
           paymentId: payment.id,
@@ -156,7 +189,34 @@ export class PaymentsService {
 
     this.logger.log(`verify: payment COMPLETED, subscription activated, invoice ${invoice.id} created`)
 
+    // پاداش دوطرفه‌ی معرفی دوستان — بعد از تراکنش اصلی و غیربحرانی؛ شکستش نباید پرداخت رو fail کنه
+    if (isReferredUser && isFirstCompletedPayment) {
+      this.issueReferralRewards(payment.userId, payment.user.referredByUserId!).catch((err) =>
+        this.logger.error(`referral reward issuance failed for payment=${payment.id}`, err),
+      )
+    }
+
     return { redirect: `${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}` }
+  }
+
+  private async issueReferralRewards(referredUserId: string, referrerUserId: string): Promise<void> {
+    const config = await this.growthConfigService.getConfig()
+    await Promise.all([
+      this.discountCodeService.issuePersonalCode({
+        userId: referredUserId,
+        source: DiscountSource.REFERRAL,
+        discountPercent: config.referralDiscountPercent,
+        validDays: config.referralDiscountValidDays,
+        dedupe: false,
+      }),
+      this.discountCodeService.issuePersonalCode({
+        userId: referrerUserId,
+        source: DiscountSource.REFERRAL,
+        discountPercent: config.referralDiscountPercent,
+        validDays: config.referralDiscountValidDays,
+        dedupe: false,
+      }),
+    ])
   }
 
   findAll(userId: string) {

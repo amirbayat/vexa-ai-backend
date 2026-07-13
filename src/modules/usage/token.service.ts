@@ -33,6 +33,12 @@ export interface PlanLimits {
   rollingWindowLimit: number | null
   rollingWindowHours: number
   contextMd: string | null // context اختصاصی این پلن (docs/PRD-chat-context-and-summarization.md بخش ۴.۳)
+  // دوره‌ی آزمایشی کاربر تازه (docs/PRD-growth-traction-features.md بخش ۳)
+  trialMessageThreshold: number | null
+  trialDailyMessageLimit: number | null
+  trialThrottledMessageCount: number | null
+  trialRollingWindowLimit: number | null
+  trialRollingWindowHours: number | null
 }
 
 // Iran Standard Time = UTC+3:30 (no DST)
@@ -255,6 +261,11 @@ export class TokenService {
         rollingWindowLimit: sub.plan.rollingWindowLimit ?? null,
         rollingWindowHours: sub.plan.rollingWindowHours,
         contextMd: sub.plan.contextMd ?? null,
+        trialMessageThreshold: sub.plan.trialMessageThreshold ?? null,
+        trialDailyMessageLimit: sub.plan.trialDailyMessageLimit ?? null,
+        trialThrottledMessageCount: sub.plan.trialThrottledMessageCount ?? null,
+        trialRollingWindowLimit: sub.plan.trialRollingWindowLimit ?? null,
+        trialRollingWindowHours: sub.plan.trialRollingWindowHours ?? null,
       }
     } else {
       // no subscription → look up the active free plan from DB instead of hardcoded defaults
@@ -280,6 +291,11 @@ export class TokenService {
         rollingWindowLimit: freePlan?.rollingWindowLimit ?? null,
         rollingWindowHours: freePlan?.rollingWindowHours ?? 3,
         contextMd: freePlan?.contextMd ?? null,
+        trialMessageThreshold: freePlan?.trialMessageThreshold ?? null,
+        trialDailyMessageLimit: freePlan?.trialDailyMessageLimit ?? null,
+        trialThrottledMessageCount: freePlan?.trialThrottledMessageCount ?? null,
+        trialRollingWindowLimit: freePlan?.trialRollingWindowLimit ?? null,
+        trialRollingWindowHours: freePlan?.trialRollingWindowHours ?? null,
       }
     }
 

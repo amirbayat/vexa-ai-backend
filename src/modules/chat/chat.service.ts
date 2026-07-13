@@ -97,6 +97,26 @@ export class ChatService {
 
     const plan = await this.tokenService.getCachedPlan(userId)
 
+    // ── دوره‌ی آزمایشی کاربر تازه (docs/PRD-growth-traction-features.md بخش ۳) ─────
+    // مادامی که lifetimeMessageCount از trialMessageThreshold کمتر است، به‌جای محدودیت‌های
+    // همیشگی پلن از نسخه‌ی «آزمایشی» همون فیلدها استفاده می‌شود (اگر ست نشده باشند، از همیشگی)
+    const dbUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { lifetimeMessageCount: true },
+    })
+    const inTrial =
+      plan.trialMessageThreshold !== null && (dbUser?.lifetimeMessageCount ?? 0) < plan.trialMessageThreshold
+    const effectiveN = inTrial ? plan.trialDailyMessageLimit ?? plan.dailyMessageLimit : plan.dailyMessageLimit
+    const effectiveM = inTrial
+      ? plan.trialThrottledMessageCount ?? plan.throttledMessageCount
+      : plan.throttledMessageCount
+    const effectiveRollingLimit = inTrial
+      ? plan.trialRollingWindowLimit ?? plan.rollingWindowLimit
+      : plan.rollingWindowLimit
+    const effectiveRollingHours = inTrial
+      ? plan.trialRollingWindowHours ?? plan.rollingWindowHours
+      : plan.rollingWindowHours
+
     // ── manual limit set by admin ──────────────────────────────────────────
     const manualLimitRaw = await this.redis.get(`manual_limit:${userId}`)
     if (manualLimitRaw) {
@@ -122,8 +142,8 @@ export class ChatService {
       throw new HttpException({ message: fa.waitlist.limitReached, waitlisted: true }, 429)
     }
 
-    const N = plan.dailyMessageLimit // normal zone ceiling (null = unlimited)
-    const M = plan.throttledMessageCount ?? 0 // throttled zone size
+    const N = effectiveN // normal zone ceiling (null = unlimited)
+    const M = effectiveM ?? 0 // throttled zone size
 
     let messageStage: 'normal' | 'throttled' = 'normal'
 
@@ -149,12 +169,15 @@ export class ChatService {
     // ── پنجره‌ی لغزان (rolling window) — بخش ۸ PRD-global-budget-gateway.md ──
     // مکمل سقف روزانه‌ی بالا، نه جایگزین آن — هر دو باید هم‌زمان رعایت شوند.
     // null یعنی این پلن اصلاً محدودیت پنجره‌ای ندارد.
-    const rollingWindow = await this.tokenService.getRollingWindowStatus(userId, plan)
+    const rollingWindow = await this.tokenService.getRollingWindowStatus(userId, {
+      rollingWindowLimit: effectiveRollingLimit,
+      rollingWindowHours: effectiveRollingHours ?? plan.rollingWindowHours,
+    })
     if (rollingWindow.blocked) {
       this.usageAnalytics.logLimitHit(userId, 'ROLLING_WINDOW_BLOCKED').catch(() => {})
       throw new HttpException(
         {
-          message: fa.chat.rollingWindowBlocked(plan.rollingWindowHours),
+          message: fa.chat.rollingWindowBlocked(effectiveRollingHours ?? plan.rollingWindowHours),
           stage: 'rolling_window_blocked',
           planTier: plan.planTier,
           resetAt: rollingWindow.resetAt,
@@ -388,9 +411,15 @@ export class ChatService {
             lastMessageAt: new Date(),
           },
         }),
+        // docs/PRD-growth-traction-features.md بخش ۳.۳ — denormalized، برای چک دوره‌ی آزمایشی
+        this.prisma.user.update({
+          where: { id: userId },
+          data: { lifetimeMessageCount: { increment: 1 } },
+        }),
         // فقط بعد از موفقیت شمرده می‌شود، نه در preflight — یک درخواست ردشده
-        // نباید سهمی از سقف پنجره‌ی لغزان مصرف کند
-        ...(plan.rollingWindowLimit !== null
+        // نباید سهمی از سقف پنجره‌ی لغزان مصرف کند (effectiveRollingLimit چون در دوره‌ی
+        // آزمایشی ممکن است با مقدار همیشگی پلن فرق کند)
+        ...(effectiveRollingLimit !== null
           ? [this.redis.zadd(rollingWindowKey(userId), Date.now(), `${Date.now()}:${crypto.randomUUID()}`)]
           : []),
       ])

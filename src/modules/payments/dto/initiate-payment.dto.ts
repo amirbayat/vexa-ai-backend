@@ -14,4 +14,9 @@ export class InitiatePaymentDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.toUpperCase() : value))
   @IsIn(PAYMENT_GATEWAY_NAMES, { message: fa.payment.gatewayNotEnabled })
   gateway?: PaymentProvider
+
+  // docs/PRD-growth-traction-features.md بخش ۵.۲
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  discountCode?: string
 }

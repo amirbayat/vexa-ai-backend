@@ -96,4 +96,29 @@ export class UpdatePlanDto {
   @IsOptional()
   @IsString({ message: fa.validation.required })
   contextMd?: string
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  trialMessageThreshold?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  trialDailyMessageLimit?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(0, { message: fa.validation.numberPositive })
+  trialThrottledMessageCount?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  trialRollingWindowLimit?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  trialRollingWindowHours?: number | null
 }

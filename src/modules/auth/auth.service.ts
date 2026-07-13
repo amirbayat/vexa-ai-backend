@@ -10,6 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { SmsService } from '../../sms/sms.service'
 import { CampaignService } from '../campaign/campaign.service'
+import { generateShortCode } from '../../common/utils/generate-code'
 import { fa } from '../../i18n/fa'
 
 // مقادیر پیش‌فرض — همه از طریق env variable قابل بازنویسی‌اند (به ثانیه)
@@ -92,7 +93,16 @@ export class AuthService {
     return { message: fa.auth.otpSent }
   }
 
-  async verifyOtp(rawPhone: string, code: string) {
+  private async generateUniqueReferralCode(): Promise<string> {
+    for (let attempt = 0; ; attempt++) {
+      const code = generateShortCode()
+      const clash = await this.prisma.user.findUnique({ where: { referralCode: code } })
+      if (!clash) return code
+      if (attempt > 5) throw new Error('failed to generate unique referral code')
+    }
+  }
+
+  async verifyOtp(rawPhone: string, code: string, referralCode?: string) {
     const phone = normalizePhone(rawPhone)
     const isTestPhone = phone === TEST_PHONE && this.isTestUserEnabled()
 
@@ -119,8 +129,19 @@ export class AuthService {
     // upsert نمی‌تواند بگوید رکورد جدید ساخته شد یا از قبل بود — برای گیت کمپین
     // سافت‌لانچ (فقط روی اولین ثبت‌نام) باید صریح جدا شود
     const existing = await this.prisma.user.findUnique({ where: { phone } })
+    let referredByUserId: string | undefined
+    if (!existing && referralCode) {
+      // کد معرفی نامعتبر باید بی‌صدا نادیده گرفته شود، نه ثبت‌نام را fail کند
+      const referrer = await this.prisma.user.findUnique({ where: { referralCode } })
+      referredByUserId = referrer?.id
+    }
     const user = existing ?? (await this.prisma.user.create({
-      data: { phone, ...(isTestPhone ? { name: TEST_USER_NAME } : {}) },
+      data: {
+        phone,
+        referralCode: await this.generateUniqueReferralCode(),
+        ...(referredByUserId ? { referredByUserId } : {}),
+        ...(isTestPhone ? { name: TEST_USER_NAME } : {}),
+      },
     }))
     const isNewUser = !existing
 
@@ -178,6 +199,7 @@ export class AuthService {
         name: true,
         role: true,
         createdAt: true,
+        referralCode: true,
         subscription: {
           select: {
             status: true,

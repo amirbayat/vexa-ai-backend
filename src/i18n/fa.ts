@@ -57,6 +57,11 @@ export const fa = {
   invoice: {
     notFound: 'فاکتور یافت نشد',
   },
+  discount: {
+    invalidCode: 'کد تخفیف نامعتبر یا منقضی‌شده است',
+    generationFailed: 'خطا در ساخت کد تخفیف. دوباره تلاش کنید',
+    notEligible: 'شما واجد شرایط دریافت این هدیه نیستید',
+  },
   subscription: {
     activated: 'اشتراک شما فعال شد',
     alreadyActive: 'شما از قبل اشتراک فعال دارید',

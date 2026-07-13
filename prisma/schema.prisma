@@ -15,19 +15,30 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  conversations  Conversation[]
-  messages       Message[]
-  subscription   Subscription?
-  payments       Payment[]
-  invoices       Invoice[]
-  refreshTokens  RefreshToken[]
-  dailyUsages    DailyUsage[]
-  feedbacks      Feedback[]
-  quotaOverride  UserQuotaOverride?
-  wallet         Wallet?
-  tickets        SupportTicket[]
-  limitHitEvents LimitHitEvent[]
-  waitlistEntry  WaitlistEntry?
+  // docs/PRD-growth-traction-features.md بخش ۳.۲ — denormalized، هر پیام (نه فقط امروز) اینکریمنت می‌شود
+  lifetimeMessageCount Int @default(0)
+
+  // docs/PRD-growth-traction-features.md بخش ۶.۲ — معرفی دوستان
+  referralCode     String  @unique
+  referredByUserId String?
+  referredByUser   User?   @relation("Referrals", fields: [referredByUserId], references: [id])
+  referredUsers    User[]  @relation("Referrals")
+
+  conversations      Conversation[]
+  messages           Message[]
+  subscription       Subscription?
+  payments           Payment[]
+  invoices           Invoice[]
+  refreshTokens      RefreshToken[]
+  dailyUsages        DailyUsage[]
+  feedbacks          Feedback[]
+  quotaOverride      UserQuotaOverride?
+  wallet             Wallet?
+  tickets            SupportTicket[]
+  limitHitEvents     LimitHitEvent[]
+  waitlistEntry      WaitlistEntry?
+  issuedDiscountCodes    DiscountCode[]           @relation("IssuedDiscountCodes")
+  discountRedemptions    DiscountCodeRedemption[]
 
   @@map("users")
 }
@@ -64,6 +75,15 @@ model Plan {
   // context اختصاصی این پلن — بعد از context عمومی (ChatConfig.globalContextMd) به system prompt چت اصلی اضافه می‌شود
   // (docs/PRD-chat-context-and-summarization.md بخش ۴)
   contextMd String? @db.Text
+
+  // دوره‌ی آزمایشی کاربر تازه (docs/PRD-growth-traction-features.md بخش ۳) — مادامی که
+  // User.lifetimeMessageCount از trialMessageThreshold کمتر است، به‌جای محدودیت‌های همیشگی
+  // بالا از این مقادیر استفاده می‌شود؛ null = از مقدار همیشگی استفاده کن
+  trialMessageThreshold      Int?
+  trialDailyMessageLimit     Int?
+  trialThrottledMessageCount Int?
+  trialRollingWindowLimit    Int?
+  trialRollingWindowHours    Int?
 
   subscriptions Subscription[]
   payments      Payment[]
@@ -172,21 +192,24 @@ enum MessageRole {
 }
 
 model Payment {
-  id          String          @id @default(uuid())
-  userId      String
-  planId      String
-  amount      Int // تومان
-  status      PaymentStatus   @default(PENDING)
-  provider    PaymentProvider @default(ZARINPAL)
-  providerRef String?         @unique
-  refId       String?
-  metadata    Json?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id             String          @id @default(uuid())
+  userId         String
+  planId         String
+  amount         Int // تومان — بعد از اعمال تخفیف (اگر کد تخفیف استفاده شده باشد)
+  status         PaymentStatus   @default(PENDING)
+  provider       PaymentProvider @default(ZARINPAL)
+  providerRef    String?         @unique
+  refId          String?
+  metadata       Json?
+  discountCodeId String? // docs/PRD-growth-traction-features.md بخش ۵.۲
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
-  user    User     @relation(fields: [userId], references: [id])
-  plan    Plan     @relation(fields: [planId], references: [id])
-  invoice Invoice?
+  user         User          @relation(fields: [userId], references: [id])
+  plan         Plan          @relation(fields: [planId], references: [id])
+  discountCode DiscountCode? @relation(fields: [discountCodeId], references: [id])
+  invoice      Invoice?
+  redemption   DiscountCodeRedemption?
 
   @@index([userId])
   @@map("payments")
@@ -553,6 +576,75 @@ model ChatConfig {
   updatedAt            DateTime @updatedAt
 
   @@map("chat_config")
+}
+
+// ─── Growth / Traction (docs/PRD-growth-traction-features.md) ─────────────────
+
+// سینگلتون — درصد/مدت تخفیف هر نوع، از پنل ادمین قابل‌تنظیم (بخش ۵.۴)
+model GrowthConfig {
+  id                        String   @id @default("singleton")
+  welcomeDiscountPercent    Int      @default(20)
+  welcomeDiscountValidHours Int      @default(72)
+  expiryDiscountPercent     Int      @default(15)
+  referralDiscountPercent   Int      @default(20)
+  referralDiscountValidDays Int      @default(30)
+  updatedAt                 DateTime @updatedAt
+
+  @@map("growth_config")
+}
+
+// سینگلتون — هدیه‌ی خوش‌آمد (فایل صوتی)؛ audioUrl فقط لینک است، نه آپلود واقعی (بخش ۴.۱)
+model OnboardingGift {
+  id          String   @id @default("singleton")
+  title       String   @default("هدیه ویژه نیوو به کاربران تازه")
+  description String   @db.Text @default("")
+  audioUrl    String?
+  isActive    Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+
+  @@map("onboarding_gift")
+}
+
+enum DiscountSource {
+  WELCOME_GIFT
+  EXPIRY_REMINDER
+  REFERRAL
+  MANUAL // کد دستی ادمین — کمپین/جشنواره
+}
+
+// جدول انعطاف‌پذیر: هم کد شخصی (issuedToUserId ست‌شده) هم کد عمومی/کمپینی (issuedToUserId=null) — بخش ۵.۱
+model DiscountCode {
+  id              String         @id @default(uuid())
+  code            String         @unique
+  discountPercent Int
+  source          DiscountSource
+  issuedToUserId  String?
+  maxUses         Int            @default(1)
+  usedCount       Int            @default(0)
+  expiresAt       DateTime?
+  isActive        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+
+  issuedToUser User?                    @relation("IssuedDiscountCodes", fields: [issuedToUserId], references: [id], onDelete: Cascade)
+  payments     Payment[]
+  redemptions  DiscountCodeRedemption[]
+
+  @@index([issuedToUserId])
+  @@map("discount_codes")
+}
+
+model DiscountCodeRedemption {
+  id             String   @id @default(uuid())
+  discountCodeId String
+  userId         String
+  paymentId      String   @unique
+  redeemedAt     DateTime @default(now())
+
+  discountCode DiscountCode @relation(fields: [discountCodeId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+  payment      Payment      @relation(fields: [paymentId], references: [id])
+
+  @@map("discount_code_redemptions")
 }
 
 // رول‌آپ روزانه برای آنالیتیکس اختصاصی ربات فروش — مشابه الگوی DailyUsage
