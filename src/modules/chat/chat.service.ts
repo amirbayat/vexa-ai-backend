@@ -20,6 +20,7 @@ import { ModelRouterService } from '../model-router/model-router.service'
 import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service'
 import { TopicService } from '../usage-analytics/topic.service'
 import { CampaignService } from '../campaign/campaign.service'
+import { ChatConfigService } from '../chat-config/chat-config.service'
 import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
@@ -59,6 +60,7 @@ export class ChatService {
     private readonly usageAnalytics: UsageAnalyticsService,
     private readonly topicService: TopicService,
     private readonly campaignService: CampaignService,
+    private readonly chatConfigService: ChatConfigService,
     private readonly config: ConfigService,
   ) {
     this.provider = createOpenAICompatible({
@@ -86,6 +88,7 @@ export class ChatService {
         systemPrompt: true,
         title: true,
         contextSummary: true,
+        summarizedUntilCreatedAt: true,
       },
     })
     if (!conversation) throw new NotFoundException(fa.conversations.notFound)
@@ -294,30 +297,23 @@ export class ChatService {
         },
       })
 
-      // ── build context: use summary + last 5 msgs if summary exists ─────────
+      // ── build context: global + plan context, سپس خلاصه‌ی احتمالی، سپس پیام‌های
+      // «بعد از آخرین خلاصه‌سازی» (نه یک سقف ثابت پیام) — docs/PRD-chat-context-and-summarization.md بخش ۳/۴
+      const chatConfig = await this.chatConfigService.getConfig()
       const systemParts: string[] = []
+      if (chatConfig.globalContextMd) systemParts.push(chatConfig.globalContextMd)
+      if (plan.contextMd) systemParts.push(plan.contextMd)
       if (conversation.systemPrompt) systemParts.push(conversation.systemPrompt)
-
-      let recentMessages: { role: string; content: string }[]
       if (conversation.contextSummary) {
-        systemParts.push(
-          `خلاصه مکالمه تا کنون:\n${conversation.contextSummary}`,
-        )
-        recentMessages = await this.prisma.message.findMany({
-          where: { conversationId },
-          orderBy: { createdAt: 'desc' },
-          take: 5,
-          select: { role: true, content: true },
-        })
-        recentMessages = recentMessages.reverse()
-      } else {
-        recentMessages = await this.prisma.message.findMany({
-          where: { conversationId },
-          orderBy: { createdAt: 'asc' },
-          take: 20,
-          select: { role: true, content: true },
-        })
+        systemParts.push(`خلاصه‌ی مکالمه تا این‌جا:\n${conversation.contextSummary}`)
       }
+
+      const cutoff = conversation.summarizedUntilCreatedAt
+      const recentMessages = await this.prisma.message.findMany({
+        where: { conversationId, ...(cutoff ? { createdAt: { gt: cutoff } } : {}) },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, role: true, content: true, createdAt: true },
+      })
 
       const hasImages = Boolean(dto.images?.length)
       const coreMessages: ModelMessage[] = recentMessages.map((m, idx) => {
@@ -366,7 +362,7 @@ export class ChatService {
       const { costToman, costUsdMicros, costInputUsdMicros, costOutputUsdMicros } =
         await this.pricingService.calcCost(usage.inputTokens ?? 0, usage.outputTokens ?? 0, modelId)
 
-      await this.prisma.message.create({
+      const assistantMessage = await this.prisma.message.create({
         data: {
           conversationId,
           userId,
@@ -399,8 +395,22 @@ export class ChatService {
           : []),
       ])
 
+      // fire-and-forget — عنوان‌سازی/خلاصه‌سازی نباید کاربر را برای پایان استریم معطل کند
       if (!conversation.title && isFirstMessage) {
-        await this.generateTitle(conversationId, fullContent, modelId)
+        this.generateTitle(conversationId, fullContent, modelId).catch(() => {})
+      }
+
+      const tokensSinceSummaryText = recentMessages.map(m => m.content).join('\n') + fullContent
+      const tokensSinceSummary = await this.tokenEstimator.estimateTokens(tokensSinceSummaryText, modelId)
+      if (tokensSinceSummary > chatConfig.summaryTriggerTokens) {
+        const messagesToSummarize = [...recentMessages, assistantMessage]
+        this.summarizeConversation(
+          conversationId,
+          conversation.contextSummary,
+          messagesToSummarize,
+          modelId,
+          chatConfig.summaryMaxTokens,
+        ).catch(() => {})
       }
 
       res.write(`data: [DONE]\n\n`)
@@ -419,18 +429,22 @@ export class ChatService {
     }
   }
 
+  // sourceText یا پاسخ اول هوش مصنوعی است (شروع مکالمه) یا یک خلاصه‌ی مکالمه (بعد از
+  // خلاصه‌سازی مبتنی بر توکن — docs/PRD-chat-context-and-summarization.md بخش ۳.۴) —
+  // در حالت دوم عنوان قبلی بی‌قیدوشرط بازنویسی می‌شود تا با تحول مکالمه هم‌راستا بماند.
   private async generateTitle(
     conversationId: string,
-    firstResponse: string,
+    sourceText: string,
     modelId: string,
   ): Promise<void> {
     try {
       const { text } = await generateText({
         model: this.provider(modelId),
         system:
-          'متن زیر پاسخ هوش مصنوعی به کاربر در ابتدای یک مکالمه است. بر اساس همین پاسخ، ' +
-          'یک عنوان کوتاه (حداکثر ۵ کلمه) برای این مکالمه بنویس. فقط عنوان، بدون توضیح یا نقل‌قول.',
-        messages: [{ role: 'user', content: firstResponse.slice(0, 500) }],
+          'متن زیر یا پاسخ ابتدایی هوش مصنوعی در یک مکالمه است یا خلاصه‌ی یک مکالمه. ' +
+          'بر اساس همین متن، یک عنوان کوتاه (حداکثر ۵ کلمه) برای این مکالمه بنویس. ' +
+          'فقط عنوان، بدون توضیح یا نقل‌قول.',
+        messages: [{ role: 'user', content: sourceText.slice(0, 500) }],
         maxOutputTokens: 40,
       })
       const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '')
@@ -443,5 +457,49 @@ export class ChatService {
     } catch {
       // non-critical
     }
+  }
+
+  // خلاصه‌سازی مبتنی بر توکن — docs/PRD-chat-context-and-summarization.md بخش ۳.۴.
+  // fire-and-forget از streamChat صدا زده می‌شود، نباید کاربر را برای پایان استریم معطل کند.
+  private async summarizeConversation(
+    conversationId: string,
+    previousSummary: string | null,
+    messages: { role: string; content: string; createdAt: Date }[],
+    modelId: string,
+    maxSummaryTokens: number,
+  ): Promise<void> {
+    const transcript = messages
+      .map(m => `${m.role === 'USER' ? 'کاربر' : 'دستیار'}: ${m.content}`)
+      .join('\n')
+    const input = previousSummary
+      ? `خلاصه‌ی قبلی:\n${previousSummary}\n\nادامه‌ی مکالمه:\n${transcript}`
+      : transcript
+
+    const { text: summary } = await generateText({
+      model: this.provider(modelId),
+      system:
+        'متن زیر بخشی از یک مکالمه است (شاید همراه با خلاصه‌ی قبلی). یک خلاصه‌ی بسیار کوتاه و ' +
+        'فشرده از نکات کلیدی، زمینه و درخواست‌های کاربر بنویس تا بعداً برای ادامه‌ی گفت‌وگو استفاده شود. ' +
+        'فقط خلاصه، بدون مقدمه یا توضیح اضافه.',
+      messages: [{ role: 'user', content: input }],
+      maxOutputTokens: maxSummaryTokens,
+    })
+
+    const trimmedSummary = summary.trim()
+    if (!trimmedSummary) return
+
+    const lastMessage = messages[messages.length - 1]
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        contextSummary: trimmedSummary,
+        summarizedAt: new Date(),
+        summarizedUntilCreatedAt: lastMessage.createdAt,
+      },
+    })
+
+    // بازسازی عنوان بر اساس خلاصه‌ی تازه — بدون قید «اگه از قبل نداشت»، چون قطعاً تا این
+    // مرحله عنوان از قبل ساخته شده و می‌خواهیم با تحول مکالمه به‌روز بماند
+    await this.generateTitle(conversationId, trimmedSummary, modelId)
   }
 }

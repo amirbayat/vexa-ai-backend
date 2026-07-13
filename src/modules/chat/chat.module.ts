@@ -6,9 +6,10 @@ import { RedisModule } from '../../redis/redis.module'
 import { ModelRouterModule } from '../model-router/model-router.module'
 import { UsageAnalyticsModule } from '../usage-analytics/usage-analytics.module'
 import { CampaignModule } from '../campaign/campaign.module'
+import { ChatConfigModule } from '../chat-config/chat-config.module'
 
 @Module({
-  imports: [UsageModule, RedisModule, ModelRouterModule, UsageAnalyticsModule, CampaignModule],
+  imports: [UsageModule, RedisModule, ModelRouterModule, UsageAnalyticsModule, CampaignModule, ChatConfigModule],
   controllers: [ChatController],
   providers: [ChatService],
 })

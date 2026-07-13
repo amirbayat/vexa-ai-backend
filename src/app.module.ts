@@ -8,6 +8,7 @@ import { UsageModule } from './modules/usage/usage.module'
 import { PlansModule } from './modules/plans/plans.module'
 import { ConversationsModule } from './modules/conversations/conversations.module'
 import { ChatModule } from './modules/chat/chat.module'
+import { ChatConfigModule } from './modules/chat-config/chat-config.module'
 import { PaymentsModule } from './modules/payments/payments.module'
 import { InvoicesModule } from './modules/invoices/invoices.module'
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module'
@@ -35,6 +36,7 @@ import { QueueModule } from './queue/queue.module'
     PlansModule,
     ConversationsModule,
     ChatModule,
+    ChatConfigModule,
     PaymentsModule,
     InvoicesModule,
     SubscriptionsModule,

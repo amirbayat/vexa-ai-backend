@@ -32,6 +32,7 @@ export interface PlanLimits {
   throttledOutputTokens: number | null
   rollingWindowLimit: number | null
   rollingWindowHours: number
+  contextMd: string | null // context اختصاصی این پلن (docs/PRD-chat-context-and-summarization.md بخش ۴.۳)
 }
 
 // Iran Standard Time = UTC+3:30 (no DST)
@@ -253,6 +254,7 @@ export class TokenService {
         throttledOutputTokens: sub.plan.throttledOutputTokens ?? null,
         rollingWindowLimit: sub.plan.rollingWindowLimit ?? null,
         rollingWindowHours: sub.plan.rollingWindowHours,
+        contextMd: sub.plan.contextMd ?? null,
       }
     } else {
       // no subscription → look up the active free plan from DB instead of hardcoded defaults
@@ -277,6 +279,7 @@ export class TokenService {
         throttledOutputTokens: freePlan?.throttledOutputTokens ?? null,
         rollingWindowLimit: freePlan?.rollingWindowLimit ?? null,
         rollingWindowHours: freePlan?.rollingWindowHours ?? 3,
+        contextMd: freePlan?.contextMd ?? null,
       }
     }
 

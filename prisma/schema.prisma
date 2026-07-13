@@ -61,6 +61,10 @@ model Plan {
 
   simpleModel  String? @default("openai/gpt-5-nano") // مدل ثابت برای پیام‌های SIMPLE این پلن — کف‌ترین/دیفالت‌ترین مدل
 
+  // context اختصاصی این پلن — بعد از context عمومی (ChatConfig.globalContextMd) به system prompt چت اصلی اضافه می‌شود
+  // (docs/PRD-chat-context-and-summarization.md بخش ۴)
+  contextMd String? @db.Text
+
   subscriptions Subscription[]
   payments      Payment[]
   routingSteps  PlanRoutingStep[]
@@ -122,6 +126,9 @@ model Conversation {
   createdAt      DateTime  @default(now())
   contextSummary String?
   summarizedAt   DateTime?
+  // پیام‌های تا این timestamp قبلاً توی contextSummary خلاصه شده‌اند — برای واکشی فقط
+  // پیام‌های «بعد از آخرین خلاصه‌سازی» (docs/PRD-chat-context-and-summarization.md بخش ۳.۱)
+  summarizedUntilCreatedAt DateTime?
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages Message[]
@@ -533,6 +540,19 @@ model SalesBotConfig {
   updatedAt           DateTime @updatedAt
 
   @@map("sales_bot_config")
+}
+
+// ─── Chat Config (docs/PRD-chat-context-and-summarization.md) ─────────────────
+
+// singleton — context عمومی + تنظیمات خلاصه‌سازی مبتنی بر توکن برای چت اصلی (دقیقاً الگوی SalesBotConfig)
+model ChatConfig {
+  id                   String   @id @default("singleton")
+  globalContextMd      String   @db.Text @default("")
+  summaryTriggerTokens Int      @default(5000) // هر چند توکن از آخرین خلاصه‌سازی، دوباره خلاصه شود
+  summaryMaxTokens     Int      @default(200)  // حداکثر طول خروجی خلاصه — کوتاه نگه داشته می‌شود
+  updatedAt            DateTime @updatedAt
+
+  @@map("chat_config")
 }
 
 // رول‌آپ روزانه برای آنالیتیکس اختصاصی ربات فروش — مشابه الگوی DailyUsage

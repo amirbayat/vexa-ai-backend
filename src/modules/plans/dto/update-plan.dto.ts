@@ -92,4 +92,8 @@ export class UpdatePlanDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
   rollingWindowHours?: number
+
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  contextMd?: string
 }
