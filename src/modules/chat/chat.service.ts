@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config'
 import * as crypto from 'crypto'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText, generateText, APICallError, RetryError } from 'ai'
+import { streamText, APICallError, RetryError } from 'ai'
 import type { ModelMessage, UserModelMessage } from 'ai'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
@@ -68,6 +68,30 @@ export class ChatService {
       baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
       apiKey: this.config.get<string>('LIARA_API_KEY')!,
     })
+  }
+
+  // برای درخواست‌های کوچک/یک‌باره‌ی داخلی (عنوان‌سازی، خلاصه‌سازی) به‌جای generateText.
+  // دلیل: در لاگ پروداکشن تأیید شد که Liara برای بعضی مدل‌ها روی مسیر non-streaming
+  // (generateText) خطای ۵۰۰ عمومی می‌دهد، در حالی که همان مدل‌ها روی streamText (که چت اصلی
+  // هم از آن استفاده می‌کند) درست کار می‌کنند — پس همین‌جا هم به‌جای تک‌درخواست، استریم می‌کنیم
+  // و متن کامل را جمع می‌زنیم؛ رفتار برای caller یکسان است، فقط مسیر گیت‌وی فرق می‌کند.
+  private async generateTextViaStream(params: {
+    modelId: string
+    system: string
+    userContent: string
+    maxOutputTokens: number
+  }): Promise<string> {
+    const result = streamText({
+      model: this.provider(params.modelId),
+      system: params.system,
+      messages: [{ role: 'user', content: params.userContent }],
+      maxOutputTokens: params.maxOutputTokens,
+    })
+    let text = ''
+    for await (const chunk of result.textStream) {
+      text += chunk
+    }
+    return text
   }
 
   async streamChat(
@@ -476,13 +500,13 @@ export class ChatService {
     modelId: string,
   ): Promise<string | null> {
     try {
-      const { text } = await generateText({
-        model: this.provider(modelId),
+      const text = await this.generateTextViaStream({
+        modelId,
         system:
           'متن زیر یا پاسخ ابتدایی هوش مصنوعی در یک مکالمه است یا خلاصه‌ی یک مکالمه. ' +
           'بر اساس همین متن، یک عنوان کوتاه (حداکثر ۵ کلمه) برای این مکالمه بنویس. ' +
           'فقط عنوان، بدون توضیح یا نقل‌قول.',
-        messages: [{ role: 'user', content: sourceText.slice(0, 500) }],
+        userContent: sourceText.slice(0, 500),
         maxOutputTokens: 40,
       })
       const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '')
@@ -534,13 +558,13 @@ export class ChatService {
       ? `خلاصه‌ی قبلی:\n${previousSummary}\n\nادامه‌ی مکالمه:\n${transcript}`
       : transcript
 
-    const { text: summary } = await generateText({
-      model: this.provider(modelId),
+    const summary = await this.generateTextViaStream({
+      modelId,
       system:
         'متن زیر بخشی از یک مکالمه است (شاید همراه با خلاصه‌ی قبلی). یک خلاصه‌ی بسیار کوتاه و ' +
         'فشرده از نکات کلیدی، زمینه و درخواست‌های کاربر بنویس تا بعداً برای ادامه‌ی گفت‌وگو استفاده شود. ' +
         'فقط خلاصه، بدون مقدمه یا توضیح اضافه.',
-      messages: [{ role: 'user', content: input }],
+      userContent: input,
       maxOutputTokens: maxSummaryTokens,
     })
 
