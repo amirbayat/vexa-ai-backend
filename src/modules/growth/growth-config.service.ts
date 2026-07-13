@@ -12,6 +12,7 @@ export type UpdatableGrowthConfig = Partial<
     | 'expiryDiscountPercent'
     | 'referralDiscountPercent'
     | 'referralDiscountValidDays'
+    | 'postTrialGraceHours'
   >
 >
 

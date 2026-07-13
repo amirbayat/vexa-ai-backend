@@ -26,27 +26,57 @@ export class GrowthPublicController {
     return gift
   }
 
-  private async isEligibleForWelcomeGift(userId: string): Promise<boolean> {
-    const [plan, dbUser] = await Promise.all([
+  // docs/PRD-growth-traction-features.md بخش ۳.۵ — قبلاً واجدشرایط‌بودن فقط «هنوز داخل trial»
+  // بود؛ یعنی کاربری که trial اش تموم می‌شد و دکمه‌ی claim رو نزده بود، برای همیشه از کد تخفیف
+  // هدیه محروم می‌ماند (باگ). حالا یک فاز دوم («grace») اضافه شده: تا postTrialGraceHours ساعت
+  // بعد از پایان trial هم، اگر هنوز خریدی نکرده باشد، همچنان می‌تواند claim/استفاده کند.
+  private async getWelcomeGiftEligibility(userId: string): Promise<{
+    eligible: boolean
+    phase: 'trial' | 'grace' | null
+    graceDeadline: Date | null
+  }> {
+    const [plan, dbUser, hasPaid] = await Promise.all([
       this.tokenService.getCachedPlan(userId),
       this.prisma.user.findUniqueOrThrow({
         where: { id: userId },
-        select: { lifetimeMessageCount: true },
+        select: { lifetimeMessageCount: true, trialEndedAt: true },
       }),
+      this.prisma.payment.count({ where: { userId, status: 'COMPLETED' } }).then(c => c > 0),
     ])
-    return plan.trialMessageThreshold !== null && dbUser.lifetimeMessageCount < plan.trialMessageThreshold
+
+    // بعد از اولین خرید، هدیه‌ی خوش‌آمد دیگر موضوعیت ندارد — حتی اگر هنوز داخل پنجره‌ی مهلت باشد
+    if (hasPaid) return { eligible: false, phase: null, graceDeadline: null }
+
+    if (plan.trialMessageThreshold !== null && dbUser.lifetimeMessageCount < plan.trialMessageThreshold) {
+      return { eligible: true, phase: 'trial', graceDeadline: null }
+    }
+
+    if (dbUser.trialEndedAt) {
+      const config = await this.growthConfig.getConfig()
+      const graceDeadline = new Date(dbUser.trialEndedAt.getTime() + config.postTrialGraceHours * 3_600_000)
+      if (Date.now() < graceDeadline.getTime()) {
+        return { eligible: true, phase: 'grace', graceDeadline }
+      }
+    }
+
+    return { eligible: false, phase: null, graceDeadline: null }
   }
 
   // برای بنر هدیه در صفحه‌ی چت — یک درخواست، هم واجدشرایط‌بودن هم محتوای هدیه را می‌دهد
   @Get('onboarding-gift/status')
   @UseGuards(JwtGuard)
   async getGiftStatus(@CurrentUser() user: JwtPayload) {
-    const [gift, eligible] = await Promise.all([
+    const [gift, eligibility] = await Promise.all([
       this.onboardingGift.getGift(),
-      this.isEligibleForWelcomeGift(user.sub),
+      this.getWelcomeGiftEligibility(user.sub),
     ])
-    const show = eligible && gift.isActive
-    return { eligible: show, gift: show ? gift : null }
+    const show = eligibility.eligible && gift.isActive
+    return {
+      eligible: show,
+      phase: show ? eligibility.phase : null,
+      graceDeadline: show ? eligibility.graceDeadline : null,
+      gift: show ? gift : null,
+    }
   }
 
   // چک واجدشرایط‌بودن (docs/PRD-growth-traction-features.md بخش ۴.۳) سمت سرور دوباره
@@ -54,7 +84,7 @@ export class GrowthPublicController {
   @Post('onboarding-gift/claim')
   @UseGuards(JwtGuard)
   async claimGift(@CurrentUser() user: JwtPayload) {
-    const eligible = await this.isEligibleForWelcomeGift(user.sub)
+    const { eligible } = await this.getWelcomeGiftEligibility(user.sub)
     if (!eligible) throw new ForbiddenException(fa.discount.notEligible)
 
     const config = await this.growthConfig.getConfig()
@@ -66,5 +96,13 @@ export class GrowthPublicController {
     })
 
     return { code: code.code, discountPercent: code.discountPercent, expiresAt: code.expiresAt }
+  }
+
+  // برای بخش «دعوت از دوستان» در پروفایل — کدهای تخفیف معتبر خود کاربر (هدیه/معرفی/یادآوری
+  // انقضا) را نشان می‌دهد؛ بدون این، کد تخفیفی که از معرفی دوستان صادر می‌شود جایی دیده نمی‌شد
+  @Get('my-discount-codes')
+  @UseGuards(JwtGuard)
+  myDiscountCodes(@CurrentUser() user: JwtPayload) {
+    return this.discountCode.listValidCodesForUser(user.sub)
   }
 }

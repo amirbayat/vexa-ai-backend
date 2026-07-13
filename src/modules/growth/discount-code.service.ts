@@ -89,6 +89,16 @@ export class DiscountCodeService {
     })
   }
 
+  /** کدهای تخفیف معتبر و مصرف‌نشده‌ی خودِ کاربر (هر source) — برای بخش «دعوت از دوستان» در پروفایل */
+  async listValidCodesForUser(userId: string): Promise<DiscountCode[]> {
+    const codes = await this.prisma.discountCode.findMany({
+      where: { issuedToUserId: userId, isActive: true },
+      orderBy: { createdAt: 'desc' },
+    })
+    const now = new Date()
+    return codes.filter(c => c.usedCount < c.maxUses && (!c.expiresAt || c.expiresAt > now))
+  }
+
   /** برای initiate() پرداخت — کد را پیدا و اعتبارسنجی می‌کند، پرتاب خطا اگر نامعتبر بود */
   async findValidCode(code: string, userId: string): Promise<DiscountCode> {
     const found = await this.prisma.discountCode.findUnique({ where: { code } })

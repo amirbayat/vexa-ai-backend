@@ -17,6 +17,9 @@ model User {
 
   // docs/PRD-growth-traction-features.md بخش ۳.۲ — denormalized، هر پیام (نه فقط امروز) اینکریمنت می‌شود
   lifetimeMessageCount Int @default(0)
+  // لحظه‌ی دقیقی که کاربر از trial خارج شد (lifetimeMessageCount اولین‌بار به trialMessageThreshold
+  // رسید) — برای پنجره‌ی مهلت ۲۴ساعته‌ی claim کد تخفیف هدیه بعد از پایان trial (بخش ۳.۵)
+  trialEndedAt DateTime?
 
   // docs/PRD-growth-traction-features.md بخش ۶.۲ — معرفی دوستان
   referralCode     String  @unique
@@ -588,6 +591,8 @@ model GrowthConfig {
   expiryDiscountPercent     Int      @default(15)
   referralDiscountPercent   Int      @default(20)
   referralDiscountValidDays Int      @default(30)
+  // مهلت بعد از پایان trial که کاربر هنوز می‌تواند کد تخفیف هدیه را claim/استفاده کند (بخش ۳.۵)
+  postTrialGraceHours       Int      @default(24)
   updatedAt                 DateTime @updatedAt
 
   @@map("growth_config")

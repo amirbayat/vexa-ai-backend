@@ -186,6 +186,7 @@ export class TokenService {
   // قبلاً هرکدام نسخه‌ی خودشون از این منطق رو داشتن و از هم عقب افتادن (بنر با کد ارسال هم‌خوان نبود).
   async getEffectiveLimits(userId: string, plan: PlanLimits): Promise<{
     inTrial: boolean
+    lifetimeMessageCount: number
     effectiveN: number | null
     effectiveM: number | null
     effectiveRollingLimit: number | null
@@ -195,11 +196,12 @@ export class TokenService {
       where: { id: userId },
       select: { lifetimeMessageCount: true },
     })
-    const inTrial =
-      plan.trialMessageThreshold !== null && (dbUser?.lifetimeMessageCount ?? 0) < plan.trialMessageThreshold
+    const lifetimeMessageCount = dbUser?.lifetimeMessageCount ?? 0
+    const inTrial = plan.trialMessageThreshold !== null && lifetimeMessageCount < plan.trialMessageThreshold
 
     return {
       inTrial,
+      lifetimeMessageCount,
       effectiveN: inTrial ? plan.trialDailyMessageLimit ?? null : plan.dailyMessageLimit,
       effectiveM: inTrial ? plan.trialThrottledMessageCount ?? null : plan.throttledMessageCount,
       effectiveRollingLimit: inTrial ? plan.trialRollingWindowLimit ?? null : plan.rollingWindowLimit,

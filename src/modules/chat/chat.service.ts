@@ -125,7 +125,7 @@ export class ChatService {
     // ── دوره‌ی آزمایشی کاربر تازه (docs/PRD-growth-traction-features.md بخش ۳) — منطق کامل
     // (شامل توضیح fallback) در TokenService.getEffectiveLimits؛ همان تابع را usage.controller
     // (بنر محدودیت) هم صدا می‌زند تا این دو جا از هم عقب نیفتند.
-    const { inTrial, effectiveN, effectiveM, effectiveRollingLimit, effectiveRollingHours } =
+    const { inTrial, lifetimeMessageCount, effectiveN, effectiveM, effectiveRollingLimit, effectiveRollingHours } =
       await this.tokenService.getEffectiveLimits(userId, plan)
 
     // ── manual limit set by admin ──────────────────────────────────────────
@@ -429,10 +429,17 @@ export class ChatService {
             lastMessageAt: new Date(),
           },
         }),
-        // docs/PRD-growth-traction-features.md بخش ۳.۳ — denormalized، برای چک دوره‌ی آزمایشی
+        // docs/PRD-growth-traction-features.md بخش ۳.۳ — denormalized، برای چک دوره‌ی آزمایشی.
+        // اگر همین پیام دقیقاً trial را به پایان می‌رساند، trialEndedAt هم همین لحظه ثبت می‌شود
+        // (بخش ۳.۵ — مبنای شمارش پنجره‌ی مهلت ۲۴ساعته‌ی claim کد تخفیف هدیه بعد از پایان trial)
         this.prisma.user.update({
           where: { id: userId },
-          data: { lifetimeMessageCount: { increment: 1 } },
+          data: {
+            lifetimeMessageCount: { increment: 1 },
+            ...(inTrial && plan.trialMessageThreshold !== null && lifetimeMessageCount + 1 >= plan.trialMessageThreshold
+              ? { trialEndedAt: new Date() }
+              : {}),
+          },
         }),
         // فقط بعد از موفقیت شمرده می‌شود، نه در preflight — یک درخواست ردشده
         // نباید سهمی از سقف پنجره‌ی لغزان مصرف کند (effectiveRollingLimit چون در دوره‌ی

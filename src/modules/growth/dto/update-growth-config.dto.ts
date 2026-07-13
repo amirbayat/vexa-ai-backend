@@ -15,4 +15,7 @@ export class UpdateGrowthConfigDto {
 
   @IsOptional() @IsInt() @Min(1) @Max(365)
   referralDiscountValidDays?: number
+
+  @IsOptional() @IsInt() @Min(1) @Max(168)
+  postTrialGraceHours?: number
 }
