@@ -388,11 +388,29 @@ export class ChatService {
       })
 
       let fullContent = ''
+      let reasoningActive = false
       const isFirstMessage = recentMessages.length === 1
 
-      for await (const chunk of result.textStream) {
-        fullContent += chunk
-        res.write(`data: ${JSON.stringify({ chunk })}\n\n`)
+      // fullStream (نه فقط textStream) چون مدل‌های reasoning (خانواده‌ی gpt-5) قبل از متن نهایی
+      // یک فاز استدلال نامرئی دارند — با تفکیک reasoning-*/text-delta می‌شود به فرانت گفت «داره
+      // فکر می‌کند» تا کاربر روی صفحه‌ی خالی/نقطه‌چین معمولی گیج نماند
+      for await (const part of result.stream) {
+        if (part.type === 'reasoning-start') {
+          reasoningActive = true
+          res.write(`data: ${JSON.stringify({ info: 'reasoning', reasoning: true })}\n\n`)
+        } else if (part.type === 'reasoning-end') {
+          if (reasoningActive) {
+            reasoningActive = false
+            res.write(`data: ${JSON.stringify({ info: 'reasoning', reasoning: false })}\n\n`)
+          }
+        } else if (part.type === 'text-delta') {
+          if (reasoningActive) {
+            reasoningActive = false
+            res.write(`data: ${JSON.stringify({ info: 'reasoning', reasoning: false })}\n\n`)
+          }
+          fullContent += part.text
+          res.write(`data: ${JSON.stringify({ chunk: part.text })}\n\n`)
+        }
       }
 
       const usage = await result.usage
