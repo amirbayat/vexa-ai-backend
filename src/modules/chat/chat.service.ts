@@ -449,6 +449,14 @@ export class ChatService {
 
       const tokensSinceSummaryText = recentMessages.map(m => m.content).join('\n') + fullContent
       const tokensSinceSummary = await this.tokenEstimator.estimateTokens(tokensSinceSummaryText, modelId)
+      // لاگ دیباگ خلاصه‌سازی — تخمین (که ممکن است برای مدل‌های non-OpenAI با نسبت
+      // chars/token تقریبی حساب شود) را کنار عدد واقعی usage.inputTokens همین درخواست می‌گذاریم
+      // تا مشخص شود آیا تخمین برای متن فارسی روی این مدل کم‌شمارش می‌کند یا نه
+      this.logger.log(
+        `summary check conversation=${conversationId} model=${modelId} ` +
+          `estimatedTokensSinceSummary=${tokensSinceSummary} triggerThreshold=${chatConfig.summaryTriggerTokens} ` +
+          `realInputTokensThisRequest=${usage.inputTokens ?? 0} willSummarize=${tokensSinceSummary > chatConfig.summaryTriggerTokens}`,
+      )
       if (tokensSinceSummary > chatConfig.summaryTriggerTokens) {
         const messagesToSummarize = [...recentMessages, assistantMessage]
         this.summarizeConversation(
@@ -503,9 +511,15 @@ export class ChatService {
           where: { id: conversationId },
           data: { title },
         })
+      } else {
+        this.logger.warn(`generateTitle: model returned empty title (conversation=${conversationId})`)
       }
-    } catch {
-      // non-critical
+    } catch (err) {
+      // fire-and-forget از streamChat — قبلاً بی‌صدا catch می‌شد؛ عنوان فقط یک‌بار (پیام اول
+      // مکالمه) تلاش می‌شود، پس اگر همین یک تلاش شکست بخورد دیگر تا خلاصه‌سازی بعدی retry نمی‌شود
+      this.logger.error(
+        `generateTitle failed (conversation=${conversationId}, model=${modelId}): ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 
