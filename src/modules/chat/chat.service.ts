@@ -97,23 +97,11 @@ export class ChatService {
 
     const plan = await this.tokenService.getCachedPlan(userId)
 
-    // ── دوره‌ی آزمایشی کاربر تازه (docs/PRD-growth-traction-features.md بخش ۳) ─────
-    // مادامی که lifetimeMessageCount از trialMessageThreshold کمتر است، سقف‌های تعداد پیام
-    // (روزانه/پنجره‌ی لغزان) و بودجه‌ی روزانه اصلاً در نظر گرفته نمی‌شوند — نامحدود است. اگر
-    // ادمین صریحاً یک عدد trial* ست کرده باشد همان به‌جای «نامحدود» رعایت می‌شود (سقف آزمایشی
-    // دلخواه)؛ در غیر این صورت (پیش‌فرض null) یعنی کاملاً بدون محدودیت، نه بازگشت به سقف همیشگی.
-    const dbUser = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { lifetimeMessageCount: true },
-    })
-    const inTrial =
-      plan.trialMessageThreshold !== null && (dbUser?.lifetimeMessageCount ?? 0) < plan.trialMessageThreshold
-    const effectiveN = inTrial ? plan.trialDailyMessageLimit ?? null : plan.dailyMessageLimit
-    const effectiveM = inTrial ? plan.trialThrottledMessageCount ?? null : plan.throttledMessageCount
-    const effectiveRollingLimit = inTrial ? plan.trialRollingWindowLimit ?? null : plan.rollingWindowLimit
-    const effectiveRollingHours = inTrial
-      ? plan.trialRollingWindowHours ?? plan.rollingWindowHours
-      : plan.rollingWindowHours
+    // ── دوره‌ی آزمایشی کاربر تازه (docs/PRD-growth-traction-features.md بخش ۳) — منطق کامل
+    // (شامل توضیح fallback) در TokenService.getEffectiveLimits؛ همان تابع را usage.controller
+    // (بنر محدودیت) هم صدا می‌زند تا این دو جا از هم عقب نیفتند.
+    const { inTrial, effectiveN, effectiveM, effectiveRollingLimit, effectiveRollingHours } =
+      await this.tokenService.getEffectiveLimits(userId, plan)
 
     // ── manual limit set by admin ──────────────────────────────────────────
     const manualLimitRaw = await this.redis.get(`manual_limit:${userId}`)

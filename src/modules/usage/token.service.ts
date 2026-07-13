@@ -150,6 +150,34 @@ export class TokenService {
     return this.redis.get(reqKey(userId)).then(v => Number(v) || 0)
   }
 
+  // دوره‌ی آزمایشی کاربر تازه (docs/PRD-growth-traction-features.md بخش ۳) — یک‌جا هم برای
+  // چک مسدودسازی واقعی (chat.service) و هم نمایش بنر محدودیت (usage.controller) استفاده می‌شود؛
+  // قبلاً هرکدام نسخه‌ی خودشون از این منطق رو داشتن و از هم عقب افتادن (بنر با کد ارسال هم‌خوان نبود).
+  async getEffectiveLimits(userId: string, plan: PlanLimits): Promise<{
+    inTrial: boolean
+    effectiveN: number | null
+    effectiveM: number | null
+    effectiveRollingLimit: number | null
+    effectiveRollingHours: number
+  }> {
+    const dbUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { lifetimeMessageCount: true },
+    })
+    const inTrial =
+      plan.trialMessageThreshold !== null && (dbUser?.lifetimeMessageCount ?? 0) < plan.trialMessageThreshold
+
+    return {
+      inTrial,
+      effectiveN: inTrial ? plan.trialDailyMessageLimit ?? null : plan.dailyMessageLimit,
+      effectiveM: inTrial ? plan.trialThrottledMessageCount ?? null : plan.throttledMessageCount,
+      effectiveRollingLimit: inTrial ? plan.trialRollingWindowLimit ?? null : plan.rollingWindowLimit,
+      effectiveRollingHours: inTrial
+        ? plan.trialRollingWindowHours ?? plan.rollingWindowHours
+        : plan.rollingWindowHours,
+    }
+  }
+
   // پنجره‌ی لغزان (rolling window) — یک‌جا هم برای چک مسدودسازی (chat.service) و هم
   // نمایش پیش‌گیرانه‌ی وضعیت (usage.controller) استفاده می‌شود تا منطق دوجا تکرار نشود.
   async getRollingWindowStatus(

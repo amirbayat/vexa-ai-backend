@@ -31,14 +31,22 @@ export class UsageController {
   @Get('message-quota')
   async getMessageQuota(@CurrentUser() user: JwtPayload) {
     const plan = await this.tokenService.getCachedPlan(user.sub)
+    // بنر محدودیت هم باید از دوره‌ی آزمایشی بی‌خبر نباشد — قبلاً مستقیم از plan.* می‌خواند
+    // و در trial همچنان «محدودیت» نشون می‌داد در حالی که ارسال واقعی دیگر مسدود نبود
+    const { inTrial, effectiveN, effectiveM, effectiveRollingLimit, effectiveRollingHours } =
+      await this.tokenService.getEffectiveLimits(user.sub, plan)
+
     const [todayCount, rollingWindow, budgetStatus] = await Promise.all([
       this.tokenService.getTodayRequestCount(user.sub),
-      this.tokenService.getRollingWindowStatus(user.sub, plan),
+      this.tokenService.getRollingWindowStatus(user.sub, {
+        rollingWindowLimit: effectiveRollingLimit,
+        rollingWindowHours: effectiveRollingHours,
+      }),
       this.pricingService.getBudgetStatus(user.sub, plan.priceMonthly, plan.planTier),
     ])
 
-    const N = plan.dailyMessageLimit
-    const M = plan.throttledMessageCount ?? 0
+    const N = effectiveN
+    const M = effectiveM ?? 0
 
     let stage: 'normal' | 'throttled' | 'blocked' = 'normal'
     if (N !== null) {
@@ -47,8 +55,9 @@ export class UsageController {
     }
 
     const budgetBlocked =
-      budgetStatus.warningLevel === 'exceeded' ||
-      (budgetStatus.warningLevel === 'session_limit' && budgetStatus.walletBalanceToman === 0)
+      !inTrial &&
+      (budgetStatus.warningLevel === 'exceeded' ||
+        (budgetStatus.warningLevel === 'session_limit' && budgetStatus.walletBalanceToman === 0))
 
     return {
       todayCount,
@@ -61,7 +70,7 @@ export class UsageController {
       throttledOutputTokens: plan.throttledOutputTokens,
       resetAt: nextIranMidnightISO(),
       planTier: plan.planTier,
-      rollingWindow: plan.rollingWindowLimit !== null
+      rollingWindow: effectiveRollingLimit !== null
         ? { blocked: rollingWindow.blocked, resetAt: rollingWindow.resetAt }
         : null,
       budget: {
