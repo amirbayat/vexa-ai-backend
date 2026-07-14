@@ -50,6 +50,7 @@ interface RoutingStepShape {
   order: number
   thresholdPct: number
   models: string[]
+  reasoningEffort: string | null
 }
 
 export interface RouteInput {
@@ -62,6 +63,7 @@ export interface RouteInput {
   planId?: string // اگر خالی باشد (مثلاً پلن رایگان در دیتابیس پیدا نشد)، مسیریابی استپی غیرفعال می‌شود
   usagePct: number // ۰ تا ۱۰۰+ — درصد مصرف بودجه‌ی روزانه
   simpleModel?: string | null // مدل ثابت پلن برای پیام‌های SIMPLE
+  reasoningEffort?: string | null // پیش‌فرض reasoning effort پلن — استپ فعلی می‌تواند override کند
 }
 
 export interface RouteResult {
@@ -70,6 +72,8 @@ export interface RouteResult {
   method: string
   confidence: number
   overriddenManualModel: string | null
+  // نهایی، بعد از اعمال override استپ (اگر بود) روی پیش‌فرض پلن — ممکن است null باشد (پیش‌فرض provider)
+  reasoningEffort: string | null
 }
 
 const TIER_RANK: Record<ModelTier, number> = {
@@ -108,6 +112,7 @@ export class ModelRouterService {
         method: 'disabled',
         confidence: 1,
         overriddenManualModel: null,
+        reasoningEffort: input.reasoningEffort ?? null,
       }
     }
 
@@ -131,6 +136,7 @@ export class ModelRouterService {
         method,
         confidence,
         overriddenManualModel: null,
+        reasoningEffort: input.reasoningEffort ?? null,
       }
     }
 
@@ -159,6 +165,8 @@ export class ModelRouterService {
       confidence,
       overriddenManualModel:
         input.manualModel && input.manualModel !== modelId ? input.manualModel : null,
+      // برای SIMPLE استپ‌بندی وجود ندارد — فقط پیش‌فرض پلن
+      reasoningEffort: input.reasoningEffort ?? null,
     }
   }
 
@@ -174,10 +182,16 @@ export class ModelRouterService {
     // پلن استپ تعریف نکرده (مثلاً رایگان) — رفتار قدیمی بدون تغییر
     if (!steps.length) {
       if (input.manualModel && candidates.some((c) => c.name === input.manualModel)) {
-        return { modelId: input.manualModel, tier, method: 'manual', confidence: 1, overriddenManualModel: null }
+        return {
+          modelId: input.manualModel, tier, method: 'manual', confidence: 1,
+          overriddenManualModel: null, reasoningEffort: input.reasoningEffort ?? null,
+        }
       }
       const modelId = this.pickFromCandidates(candidates, tier)
-      return { modelId, tier, method, confidence, overriddenManualModel: null }
+      return {
+        modelId, tier, method, confidence,
+        overriddenManualModel: null, reasoningEffort: input.reasoningEffort ?? null,
+      }
     }
 
     const firstStep = steps[0]
@@ -189,7 +203,11 @@ export class ModelRouterService {
       input.usagePct <= firstStep.thresholdPct &&
       candidates.some((c) => c.name === input.manualModel)
     ) {
-      return { modelId: input.manualModel, tier, method: 'manual', confidence: 1, overriddenManualModel: null }
+      return {
+        modelId: input.manualModel, tier, method: 'manual', confidence: 1,
+        overriddenManualModel: null,
+        reasoningEffort: firstStep.reasoningEffort ?? input.reasoningEffort ?? null,
+      }
     }
 
     const stepCandidates = candidates.filter((c) => currentStep.models.includes(c.name))
@@ -204,6 +222,8 @@ export class ModelRouterService {
       method: stepCandidates.length ? 'budget_step' : method,
       confidence,
       overriddenManualModel: input.manualModel && input.manualModel !== modelId ? input.manualModel : null,
+      // استپ فعلی می‌تواند reasoning effort را override کند؛ وگرنه از پیش‌فرض پلن ارث می‌برد
+      reasoningEffort: currentStep.reasoningEffort ?? input.reasoningEffort ?? null,
     }
   }
 
@@ -251,6 +271,7 @@ export class ModelRouterService {
       order: r.order,
       thresholdPct: r.thresholdPct,
       models: r.models as string[],
+      reasoningEffort: r.reasoningEffort ?? null,
     }))
 
     await this.redis.set(cacheKey, JSON.stringify(steps), 'EX', STEPS_CACHE_TTL)

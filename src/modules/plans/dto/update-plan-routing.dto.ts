@@ -4,6 +4,7 @@ export interface RoutingStepInput {
   order: number
   thresholdPct: number
   models: string[]
+  reasoningEffort?: string | null
 }
 
 export class UpdatePlanRoutingDto {

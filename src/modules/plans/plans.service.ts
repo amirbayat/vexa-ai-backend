@@ -75,6 +75,7 @@ export class PlansService {
         ...(dto.rollingWindowLimit !== undefined && { rollingWindowLimit: dto.rollingWindowLimit ?? null }),
         ...(dto.rollingWindowHours !== undefined && { rollingWindowHours: dto.rollingWindowHours }),
         ...(dto.contextMd !== undefined && { contextMd: dto.contextMd }),
+        ...(dto.reasoningEffort !== undefined && { reasoningEffort: dto.reasoningEffort ?? null }),
         ...(dto.trialMessageThreshold !== undefined && { trialMessageThreshold: dto.trialMessageThreshold ?? null }),
         ...(dto.trialDailyMessageLimit !== undefined && { trialDailyMessageLimit: dto.trialDailyMessageLimit ?? null }),
         ...(dto.trialThrottledMessageCount !== undefined && {

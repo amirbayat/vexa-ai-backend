@@ -55,8 +55,24 @@ export class LiveStatsService {
 
   async trackStreamStart(): Promise<string> {
     const id = crypto.randomUUID()
-    await this.redis.zadd(ACTIVE_STREAMS_KEY, Date.now(), id)
+    const now = Date.now()
+    await this.redis.zadd(ACTIVE_STREAMS_KEY, now, id)
+    // پیک هم‌زمانی امروز — همین‌جا (نه با یک job نمونه‌بردار جدا) به‌روزرسانی می‌شود، چون
+    // هم‌زمانی خودش یک gauge لحظه‌ای است، نه شمارنده‌ی افزایشی؛ فقط نقطه‌ای که تغییر می‌کند
+    // (شروع/پایان یک استریم) فرصت درستی برای نمونه‌برداری آن است
+    this.bumpDailyPeak(now).catch(() => {})
     return id
+  }
+
+  private async bumpDailyPeak(now: number): Promise<void> {
+    const current = await this.redis.zcard(ACTIVE_STREAMS_KEY)
+    const peakKey = `live:daily-peak:${dayBucket(new Date(now))}`
+    const existing = Number((await this.redis.get(peakKey)) ?? 0)
+    // race خفیف بین چند درخواست هم‌زمان ممکن است، ولی این فقط یک عدد نمایشی برای داشبورد است؛
+    // خودش را در همان لحظات پرترافیک (که دقیقاً وقتی مهم است) مکرراً تصحیح می‌کند
+    if (current > existing) {
+      await this.redis.set(peakKey, current, 'EX', 90 * 86400) // ۹۰ روز — کافی برای روند چند ماهه
+    }
   }
 
   async trackStreamEnd(id: string): Promise<void> {
@@ -107,5 +123,23 @@ export class LiveStatsService {
       const raw = (results?.[i]?.[1] as Record<string, string>) ?? null
       return { bucket, ...parseStatsHash(raw) }
     })
+  }
+
+  /** پیک هم‌زمانی (حداکثر تعداد چت هم‌زمان مشاهده‌شده) به‌ازای روز — برای نمودار خطی روند */
+  async getDailyPeaks(days: number): Promise<{ day: string; peak: number }[]> {
+    const now = new Date()
+    const dayKeys: string[] = []
+    for (let i = days - 1; i >= 0; i--) {
+      dayKeys.push(dayBucket(new Date(now.getTime() - i * 86_400_000)))
+    }
+
+    const pipeline = this.redis.pipeline()
+    dayKeys.forEach(d => pipeline.get(`live:daily-peak:${d}`))
+    const results = await pipeline.exec()
+
+    return dayKeys.map((day, i) => ({
+      day,
+      peak: Number((results?.[i]?.[1] as string | null) ?? 0),
+    }))
   }
 }

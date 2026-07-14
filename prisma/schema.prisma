@@ -75,6 +75,11 @@ model Plan {
 
   simpleModel  String? @default("openai/gpt-5-nano") // مدل ثابت برای پیام‌های SIMPLE این پلن — کف‌ترین/دیفالت‌ترین مدل
 
+  // میزان reasoning effort برای پاسخ اصلی چت این پلن (مدل‌های reasoning مثل خانواده‌ی gpt-5) —
+  // 'minimal' | 'low' | 'medium' | 'high'؛ null = پیش‌فرض provider (معمولاً medium). می‌تواند
+  // به‌ازای هر استپ بودجه‌ای (PlanRoutingStep.reasoningEffort) override شود.
+  reasoningEffort String?
+
   // context اختصاصی این پلن — بعد از context عمومی (ChatConfig.globalContextMd) به system prompt چت اصلی اضافه می‌شود
   // (docs/PRD-chat-context-and-summarization.md بخش ۴)
   contextMd String? @db.Text
@@ -103,6 +108,8 @@ model PlanRoutingStep {
   order        Int                // ترتیب استپ (۱، ۲، ۳، ...)
   thresholdPct Int                // سقف تجمعی درصد مصرف روزانه (مثلاً ۶۰، ۹۰، ۱۰۰)
   models       Json               // string[] ترتیب‌دار — استخر مدل‌های این استپ (زیرمجموعه‌ی allowedModels پلن)
+  // override میزان reasoning effort فقط برای همین استپ — null یعنی از Plan.reasoningEffort ارث می‌برد
+  reasoningEffort String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

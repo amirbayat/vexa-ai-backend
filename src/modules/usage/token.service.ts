@@ -26,6 +26,8 @@ export interface PlanLimits {
   planTier: string
   planName: string
   simpleModel: string | null
+  // میزان reasoning effort پیش‌فرض این پلن — null = پیش‌فرض provider (docs/PERFORMANCE بحث reasoning)
+  reasoningEffort: string | null
   dailyMessageLimit: number | null
   throttledMessageCount: number | null
   throttledInputTokens: number | null
@@ -315,6 +317,7 @@ export class TokenService {
         planTier: tier,
         planName: sub.plan.name,
         simpleModel: sub.plan.simpleModel ?? null,
+        reasoningEffort: sub.plan.reasoningEffort ?? null,
         dailyMessageLimit: sub.plan.dailyMessageLimit ?? null,
         throttledMessageCount: sub.plan.throttledMessageCount ?? null,
         throttledInputTokens: sub.plan.throttledInputTokens ?? null,
@@ -345,6 +348,7 @@ export class TokenService {
         planTier: 'free',
         planName: freePlan?.name ?? 'Free',
         simpleModel: freePlan?.simpleModel ?? null,
+        reasoningEffort: freePlan?.reasoningEffort ?? null,
         dailyMessageLimit: freePlan?.dailyMessageLimit ?? null,
         throttledMessageCount: freePlan?.throttledMessageCount ?? null,
         throttledInputTokens: freePlan?.throttledInputTokens ?? null,

@@ -23,4 +23,10 @@ export class LiveStatsAdminController {
     const parsed = Math.min(Math.max(Number(minutes) || 60, 1), 24 * 60)
     return this.liveStats.getTimeseries(parsed)
   }
+
+  @Get('daily-peaks')
+  getDailyPeaks(@Query('days') days?: string) {
+    const parsed = Math.min(Math.max(Number(days) || 14, 1), 90)
+    return this.liveStats.getDailyPeaks(parsed)
+  }
 }

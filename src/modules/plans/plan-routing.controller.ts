@@ -4,6 +4,7 @@ import { AdminGuard } from '../../common/guards/admin.guard'
 import { PrismaService } from '../../prisma/prisma.service'
 import { ModelRouterService } from '../model-router/model-router.service'
 import { UpdatePlanRoutingDto } from './dto/update-plan-routing.dto'
+import { REASONING_EFFORT_VALUES } from './reasoning-effort.constants'
 
 @Controller('admin/plans/:id/routing')
 @UseGuards(JwtGuard, AdminGuard)
@@ -43,6 +44,12 @@ export class PlanRoutingController {
           throw new BadRequestException(`مدل «${m}» در مدل‌های مجاز این پلن نیست`)
         }
       }
+      if (
+        step.reasoningEffort != null &&
+        !(REASONING_EFFORT_VALUES as readonly string[]).includes(step.reasoningEffort)
+      ) {
+        throw new BadRequestException(`میزان reasoning «${step.reasoningEffort}» نامعتبر است`)
+      }
     })
 
     await this.prisma.$transaction([
@@ -50,7 +57,13 @@ export class PlanRoutingController {
       this.prisma.plan.update({ where: { id }, data: { simpleModel: dto.simpleModel ?? null } }),
       ...sorted.map((step) =>
         this.prisma.planRoutingStep.create({
-          data: { planId: id, order: step.order, thresholdPct: step.thresholdPct, models: step.models },
+          data: {
+            planId: id,
+            order: step.order,
+            thresholdPct: step.thresholdPct,
+            models: step.models,
+            reasoningEffort: step.reasoningEffort ?? null,
+          },
         }),
       ),
     ])

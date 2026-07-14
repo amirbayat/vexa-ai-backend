@@ -36,6 +36,11 @@ const OPTIMAL_MODE = 'optimal'
 // usage.inputTokens/outputTokens for the model that ends up running.
 const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-4o-mini'
 
+// همان union که 'ai' برای LanguageModelCallOptions.reasoning می‌خواهد — به‌صورت type export
+// شده نیست، پس اینجا تکرارش می‌کنیم. مقدار Plan.reasoningEffort/PlanRoutingStep.reasoningEffort
+// در DTO ادمین با @IsIn به همین مقادیر محدود شده، پس این cast امن است.
+type ReasoningEffort = 'provider-default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
 const LEGACY_MODEL_MAP: Record<string, string> = {
   'gpt-4o-mini': 'openai/gpt-4o-mini',
   'gpt-4o': 'openai/gpt-4o',
@@ -274,6 +279,7 @@ export class ChatService {
       planId: plan.planId ?? undefined,
       usagePct,
       simpleModel: plan.simpleModel,
+      reasoningEffort: plan.reasoningEffort,
     })
     const modelId = routed.modelId
     this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => {})
@@ -407,6 +413,9 @@ export class ChatService {
         // chunkMs نه totalMs — پاسخ‌های بلند مجازند طول بکشند، فقط اگر بین دو chunk بیش از
         // این مدت سکوت شد (گیرکردن واقعی اتصال) قطع شود (docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۸)
         timeout: { chunkMs: 30_000 },
+        // میزان reasoning effort قابل‌تنظیم در ادمین — پیش‌فرض پلن، با امکان override به‌ازای
+        // استپ بودجه‌ای (مسیریابی مدل). null یعنی از پیش‌فرض provider استفاده شود (کلید ست نمی‌شود)
+        ...(routed.reasoningEffort ? { reasoning: routed.reasoningEffort as ReasoningEffort } : {}),
       })
 
       let fullContent = ''

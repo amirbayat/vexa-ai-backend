@@ -1,5 +1,6 @@
-import { IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator'
+import { IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator'
 import { fa } from '../../../i18n/fa'
+import { REASONING_EFFORT_VALUES } from '../reasoning-effort.constants'
 
 export class CreatePlanDto {
   @IsString({ message: fa.validation.required })
@@ -89,6 +90,10 @@ export class CreatePlanDto {
   @IsOptional()
   @IsString({ message: fa.validation.required })
   contextMd?: string
+
+  @IsOptional()
+  @IsIn(REASONING_EFFORT_VALUES, { message: fa.validation.required })
+  reasoningEffort?: string | null
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
