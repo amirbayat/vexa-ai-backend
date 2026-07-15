@@ -43,6 +43,7 @@ export const fa = {
     rollingWindowBlocked: (hours: number) => `تعداد پیام‌های شما در ${hours} ساعت اخیر به سقف مجاز رسیده.`,
     imageGenNotSupported: 'مدل انتخابی از تولید عکس پشتیبانی نمی‌کند. لطفاً یک مدل تولید عکس انتخاب کنید.',
     imageGenFailed: 'تولید عکس ناموفق بود. دوباره تلاش کنید',
+    imageGenPolicyViolation: 'این درخواست به‌خاطر سیاست‌های ایمنی محتوا رد شد. لطفاً توصیف دیگری امتحان کنید.',
   },
   payment: {
     pending: 'در انتظار پرداخت',
