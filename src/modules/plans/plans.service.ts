@@ -87,13 +87,24 @@ export class PlansService {
         ...(dto.trialRollingWindowHours !== undefined && {
           trialRollingWindowHours: dto.trialRollingWindowHours ?? null,
         }),
+        ...(dto.isPayAsYouGo !== undefined && { isPayAsYouGo: dto.isPayAsYouGo }),
+        ...(dto.payAsYouGoMarkup !== undefined && { payAsYouGoMarkup: dto.payAsYouGoMarkup }),
+        ...(dto.payAsYouGoMinActivationToman !== undefined && {
+          payAsYouGoMinActivationToman: dto.payAsYouGoMinActivationToman,
+        }),
+        ...(dto.payAsYouGoMinTopupToman !== undefined && {
+          payAsYouGoMinTopupToman: dto.payAsYouGoMinTopupToman,
+        }),
+        ...(dto.payAsYouGoTopupPresets !== undefined && {
+          payAsYouGoTopupPresets: dto.payAsYouGoTopupPresets as Prisma.InputJsonValue,
+        }),
       },
     })
   }
 
   async update(id: string, dto: UpdatePlanDto) {
     await this.findOne(id)
-    const { features, outputThrottleSteps, featuredModels, ...rest } = dto
+    const { features, outputThrottleSteps, featuredModels, payAsYouGoTopupPresets, ...rest } = dto
     const updated = await this.prisma.plan.update({
       where: { id },
       data: {
@@ -103,6 +114,9 @@ export class PlansService {
           outputThrottleSteps: outputThrottleSteps as Prisma.InputJsonValue,
         }),
         ...(featuredModels !== undefined && { featuredModels: featuredModels as Prisma.InputJsonValue }),
+        ...(payAsYouGoTopupPresets !== undefined && {
+          payAsYouGoTopupPresets: payAsYouGoTopupPresets as Prisma.InputJsonValue,
+        }),
       },
     })
     // invalidate Redis plan cache for every subscriber

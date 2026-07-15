@@ -25,6 +25,7 @@ import { LiveStatsService } from '../live-stats/live-stats.service'
 import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
+import { validateChatImages } from '../../common/validators/chat-image.validator'
 
 const OPTIMAL_MODE = 'optimal'
 
@@ -231,9 +232,11 @@ export class ChatService {
     }
 
     // ── budget check + usage percentage (برای مسیریابی استپی Router) ────────
-    // در دوره‌ی آزمایشی، بودجه‌ی روزانه هم مثل سقف‌های تعداد پیام نادیده گرفته می‌شود
+    // در دوره‌ی آزمایشی، بودجه‌ی روزانه هم مثل سقف‌های تعداد پیام نادیده گرفته می‌شود.
+    // docs/PRD-pay-as-you-go-wallet.md — پلن PAYG اصلاً بودجه‌ی درصدی priceMonthly ندارد؛
+    // گیت واقعی مصرف این پلن چند خط پایین‌تر (بعد از مشخص‌شدن مدل) با موجودی کیف‌پول است.
     let usagePct: number
-    if (inTrial) {
+    if (inTrial || plan.isPayAsYouGo) {
       usagePct = 0
     } else {
       try {
@@ -280,14 +283,23 @@ export class ChatService {
       usagePct,
       simpleModel: plan.simpleModel,
       reasoningEffort: plan.reasoningEffort,
+      isPayAsYouGo: plan.isPayAsYouGo,
     })
     const modelId = routed.modelId
     this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => {})
 
-    // ── vision check (preflight) ──────────────────────────────────────────
-    // نکته: وقتی rawModelChoice === 'optimal' باشد، aiModel با این نام پیدا نمی‌شود (modelRecord=null)
-    // و این چک بی‌اثر می‌ماند — Router خودش تضمین می‌کند مدل انتخابی از vision پشتیبانی کند (بخش hasImages بالا).
+    // ── تصاویر: اعتبارسنجی امنیتی + چک vision (preflight) ──────────────────
+    // docs/PRD-chat-images.md بخش ۵.۱ — قبل از این، هیچ چک فرمت/حجم/magic-bytes ای
+    // روی dto.images نبود؛ سقف‌ها هم از تنظیمات ادمین (ChatConfig) خوانده می‌شوند، نه ثابت در کد.
+    const chatConfig = await this.chatConfigService.getConfig()
     if (dto.images?.length) {
+      validateChatImages(dto.images, {
+        maxCount: chatConfig.maxImagesPerMessage,
+        maxSizeMb: chatConfig.maxImageSizeMb,
+      })
+
+      // نکته: وقتی rawModelChoice === 'optimal' باشد، aiModel با این نام پیدا نمی‌شود (modelRecord=null)
+      // و این چک بی‌اثر می‌ماند — Router خودش تضمین می‌کند مدل انتخابی از vision پشتیبانی کند (بخش hasImages بالا).
       const modelRecord = await this.prisma.aiModel.findFirst({
         where: { name: rawModelChoice, isActive: true },
         select: { supportsVision: true },
@@ -305,7 +317,14 @@ export class ChatService {
       dto.content,
       modelId,
     )
-    const quota = await this.tokenService.checkQuota(userId, plan, estimatedForQuota, inTrial)
+    // docs/PRD-pay-as-you-go-wallet.md — PAYG سقف توکن رایگان/ماهانه ندارد؛ همان bypass موجود
+    // برای دوره‌ی آزمایشی اینجا هم استفاده می‌شود (checkQuota با bypass=true چیزی نمی‌سنجد)
+    const quota = await this.tokenService.checkQuota(
+      userId,
+      plan,
+      estimatedForQuota,
+      inTrial || plan.isPayAsYouGo,
+    )
     const throttledMax = this.tokenService.resolveOutputThrottle(
       plan.outputThrottleSteps,
       todayCount,
@@ -314,6 +333,21 @@ export class ChatService {
     // further restrict output if in throttled zone
     if (messageStage === 'throttled' && plan.throttledOutputTokens) {
       maxOut = Math.min(maxOut, plan.throttledOutputTokens)
+    }
+
+    // ── گیت مصرف PAYG — بدون بودجه‌ی درصدی، فقط موجودی واقعی کیف‌پول ────────
+    // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۲ — تخمین بدبینانه (فرض مصرف کامل maxOut خروجی)
+    // تا هیچ‌وقت پیامی اجازه‌ی شروع پیدا نکند که موجودی برایش کافی نیست (بدون موجودی منفی)
+    if (plan.isPayAsYouGo) {
+      const markup = plan.payAsYouGoMarkup ?? 1.3
+      const worstCase = await this.pricingService.calcCost(estimatedForQuota, maxOut, modelId)
+      const balance = await this.pricingService.getWalletBalance(userId)
+      if (balance < Math.ceil(worstCase.costToman * markup)) {
+        throw new HttpException(
+          { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
+          402,
+        )
+      }
     }
 
     // ── ALL CHECKS PASSED — start SSE stream ──────────────────────────────
@@ -365,7 +399,7 @@ export class ChatService {
 
       // ── build context: global + plan context, سپس خلاصه‌ی احتمالی، سپس پیام‌های
       // «بعد از آخرین خلاصه‌سازی» (نه یک سقف ثابت پیام) — docs/PRD-chat-context-and-summarization.md بخش ۳/۴
-      const chatConfig = await this.chatConfigService.getConfig()
+      // (chatConfig بالاتر، قبل از preflight تصاویر، همین‌جا گرفته شده — کش ۶۰ ثانیه‌ای سرویس)
       const systemParts: string[] = []
       if (chatConfig.globalContextMd) systemParts.push(chatConfig.globalContextMd)
       if (plan.contextMd) systemParts.push(plan.contextMd)
@@ -507,6 +541,21 @@ export class ChatService {
           ? [this.redis.zadd(rollingWindowKey(userId), Date.now(), `${Date.now()}:${crypto.randomUUID()}`)]
           : []),
       ])
+
+      // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۲ — هزینه‌ی واقعی × ضریب پلن از کیف‌پول کم می‌شود؛
+      // پیش‌چک بدبینانه‌ی بالاتر (maxOut کامل) تضمین می‌کند این تقریباً هیچ‌وقت insufficient نشود،
+      // ولی خطا اینجا فقط لاگ می‌شود نه throw — پیام و پاسخ قبلاً موفق برای کاربر تمام شده‌اند
+      if (plan.isPayAsYouGo) {
+        this.pricingService
+          .debitWallet(userId, costToman, plan.payAsYouGoMarkup ?? 1.3, fa.payAsYouGo.messageDebitDescription, {
+            messageId: assistantMessage.id,
+            conversationId,
+          })
+          .then((ok) => {
+            if (!ok) this.logger.error(`debitWallet: insufficient balance for user=${userId} message=${assistantMessage.id}`)
+          })
+          .catch((err) => this.logger.error(`debitWallet failed for user=${userId} message=${assistantMessage.id}`, err))
+      }
 
       // فقط برای اولین پیام مکالمه: منتظر عنوان می‌مانیم (نه fire-and-forget) تا همان لحظه با یک
       // SSE event به فرانت فرستاده شود — قبلاً fire-and-forget بود و چون invalidate کوئری‌ها روی

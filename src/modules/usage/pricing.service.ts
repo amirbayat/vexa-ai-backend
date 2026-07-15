@@ -1,5 +1,6 @@
 import { HttpException, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { Prisma } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { ExchangeRateService } from '../../exchange-rate/exchange-rate.service'
@@ -59,7 +60,6 @@ export class PricingService {
   private readonly downgradePct: number
   private readonly sessionLimitPct: number
   private readonly freeBudgetToman: number
-  private readonly walletMarkup: number
 
   constructor(
     private readonly config: ConfigService,
@@ -73,7 +73,6 @@ export class PricingService {
     this.downgradePct = Number(this.config.get('BUDGET_DOWNGRADE_PCT', '80')) / 100
     this.sessionLimitPct = Number(this.config.get('BUDGET_SESSION_LIMIT_PCT', '90')) / 100
     this.freeBudgetToman = Number(this.config.get('FREE_PLAN_MONTHLY_BUDGET_TOMAN', '5000'))
-    this.walletMarkup = Number(this.config.get('WALLET_MARKUP', '1.667'))
   }
 
   // قیمت هر مدل از AiModel (پنل ادمین) خوانده می‌شود، نه یک نگاشت هاردکد —
@@ -102,10 +101,6 @@ export class PricingService {
   async monthlyBudgetToman(priceMonthly: number): Promise<number> {
     if (priceMonthly === 0) return this.freeBudgetToman
     return Math.floor(priceMonthly * this.aiShare)
-  }
-
-  walletCostForToman(baseToman: number): number {
-    return Math.ceil(baseToman * this.walletMarkup)
   }
 
   async trackCost(userId: string, costToman: number, costUsdMicros = 0): Promise<void> {
@@ -199,8 +194,51 @@ export class PricingService {
     return { usagePct: status.usagePct }
   }
 
-  async debitWallet(userId: string, costToman: number, description: string): Promise<boolean> {
-    const walletCost = this.walletCostForToman(costToman)
+  // docs/PRD-pay-as-you-go-wallet.md — بدون سقف روزانه/ماهانه‌ی مشتق از priceMonthly؛ فقط موجودی
+  // واقعی کیف‌پول. ضریب (payAsYouGoMarkup) از خودِ پلن PAYG می‌آید، نه یک env ثابت سراسری.
+  async getWalletBalance(userId: string): Promise<number> {
+    const wallet = await this.prisma.wallet.findUnique({ where: { userId }, select: { balanceToman: true } })
+    return wallet?.balanceToman ?? 0
+  }
+
+  // برای صفحه‌ی «کیف‌پول» خودِ کاربر (front-end/settings/wallet)
+  async getWalletDetail(userId: string) {
+    const wallet = await this.prisma.wallet.findUnique({ where: { userId } })
+    if (!wallet) return { balanceToman: 0, transactions: [] }
+
+    const transactions = await this.prisma.walletTransaction.findMany({
+      where: { walletId: wallet.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    })
+    return { balanceToman: wallet.balanceToman, transactions }
+  }
+
+  // docs/PRD-pay-as-you-go-wallet.md — بازگشت وجه دستی توسط ادمین (پول واقعی خارج از سیستم
+  // برگردانده می‌شود؛ این فقط دفترداری است): موجودی صفر می‌شود و یک تراکنش DEBIT با مبلغ
+  // دقیق بازگشتی ثبت می‌شود تا در تاریخچه‌ی کیف‌پول قابل پیگیری بماند
+  async refundWallet(userId: string, description: string): Promise<number> {
+    const wallet = await this.prisma.wallet.findUnique({ where: { userId } })
+    if (!wallet || wallet.balanceToman <= 0) return 0
+
+    const amount = wallet.balanceToman
+    await this.prisma.$transaction([
+      this.prisma.wallet.update({ where: { userId }, data: { balanceToman: 0 } }),
+      this.prisma.walletTransaction.create({
+        data: { walletId: wallet.id, type: 'DEBIT', amountToman: amount, description },
+      }),
+    ])
+    return amount
+  }
+
+  async debitWallet(
+    userId: string,
+    costToman: number,
+    markup: number,
+    description: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<boolean> {
+    const walletCost = Math.ceil(costToman * markup)
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } })
     if (!wallet || wallet.balanceToman < walletCost) return false
 
@@ -210,7 +248,13 @@ export class PricingService {
         data: { balanceToman: { decrement: walletCost } },
       }),
       this.prisma.walletTransaction.create({
-        data: { walletId: wallet.id, type: 'DEBIT', amountToman: walletCost, description },
+        data: {
+          walletId: wallet.id,
+          type: 'DEBIT',
+          amountToman: walletCost,
+          description,
+          ...(metadata !== undefined && { metadata: metadata as Prisma.InputJsonValue }),
+        },
       }),
     ])
     return true

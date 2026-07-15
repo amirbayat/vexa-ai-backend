@@ -93,6 +93,14 @@ model Plan {
   trialRollingWindowLimit    Int?
   trialRollingWindowHours    Int?
 
+  // docs/PRD-pay-as-you-go-wallet.md — پلن مصرفی: بدون بودجه‌ی روزانه/ماهانه مشتق از priceMonthly،
+  // بدون fallback پله‌ای PlanRoutingStep؛ مصرف واقعی × payAsYouGoMarkup از Wallet کاربر کم می‌شود
+  isPayAsYouGo                 Boolean @default(false)
+  payAsYouGoMarkup             Float?  @default(1.3)
+  payAsYouGoMinActivationToman Int?    @default(1000000)
+  payAsYouGoMinTopupToman      Int?    @default(500000)
+  payAsYouGoTopupPresets       Json?   @default("[1000000,2000000,5000000]")
+
   subscriptions Subscription[]
   payments      Payment[]
   routingSteps  PlanRoutingStep[]
@@ -204,7 +212,8 @@ enum MessageRole {
 model Payment {
   id             String          @id @default(uuid())
   userId         String
-  planId         String
+  kind           PaymentKind     @default(SUBSCRIPTION) // docs/PRD-pay-as-you-go-wallet.md — WALLET_TOPUP پلن ندارد
+  planId         String? // فقط SUBSCRIPTION — WALLET_TOPUP این را null می‌گذارد
   amount         Int // تومان — بعد از اعمال تخفیف (اگر کد تخفیف استفاده شده باشد)
   status         PaymentStatus   @default(PENDING)
   provider       PaymentProvider @default(ZARINPAL)
@@ -216,13 +225,18 @@ model Payment {
   updatedAt      DateTime        @updatedAt
 
   user         User          @relation(fields: [userId], references: [id])
-  plan         Plan          @relation(fields: [planId], references: [id])
+  plan         Plan?         @relation(fields: [planId], references: [id])
   discountCode DiscountCode? @relation(fields: [discountCodeId], references: [id])
   invoice      Invoice?
   redemption   DiscountCodeRedemption?
 
   @@index([userId])
   @@map("payments")
+}
+
+enum PaymentKind {
+  SUBSCRIPTION
+  WALLET_TOPUP
 }
 
 enum PaymentStatus {
@@ -239,7 +253,7 @@ model Invoice {
   number     Int      @unique @default(autoincrement())
   paymentId  String   @unique
   userId     String
-  planName   String
+  planName   String? // WALLET_TOPUP پلنی ندارد — «شارژ کیف‌پول» به‌جایش نوشته می‌شود
   amount     Int // تومان — مبلغ نهایی پرداخت‌شده
   taxAmount  Int      @default(0) // تومان — رزرو برای مالیات بر ارزش افزوده در آینده، فعلاً محاسبه نمی‌شود
   provider   PaymentProvider
@@ -447,6 +461,7 @@ model AiModel {
   inputPricePerM  Float       @default(0)
   outputPricePerM Float       @default(0)
   supportsVision  Boolean     @default(false)
+  supportsImageGen Boolean    @default(false) // docs/PRD-chat-images.md — تولید عکس
   isActive        Boolean     @default(true)
   sortOrder       Int         @default(0)
   tier            ModelTier   @default(MEDIUM)
@@ -583,6 +598,8 @@ model ChatConfig {
   globalContextMd      String   @db.Text @default("")
   summaryTriggerTokens Int      @default(5000) // هر چند توکن از آخرین خلاصه‌سازی، دوباره خلاصه شود
   summaryMaxTokens     Int      @default(200)  // حداکثر طول خروجی خلاصه — کوتاه نگه داشته می‌شود
+  maxImagesPerMessage  Int      @default(4)    // docs/PRD-chat-images.md بخش ۵.۶
+  maxImageSizeMb       Int      @default(8)    // سقف سایز هر عکس بعد از decode
   updatedAt            DateTime @updatedAt
 
   @@map("chat_config")

@@ -5,9 +5,10 @@ import { PrismaModule } from '../../prisma/prisma.module'
 import { RedisModule } from '../../redis/redis.module'
 import { TicketsModule } from '../tickets/tickets.module'
 import { ExchangeRateModule } from '../../exchange-rate/exchange-rate.module'
+import { UsageModule } from '../usage/usage.module'
 
 @Module({
-  imports: [PrismaModule, RedisModule, TicketsModule, ExchangeRateModule],
+  imports: [PrismaModule, RedisModule, TicketsModule, ExchangeRateModule, UsageModule],
   controllers: [AdminController],
   providers: [AdminService],
 })

@@ -5,7 +5,10 @@ import type { ChatConfig } from '@prisma/client'
 const CACHE_TTL_MS = 60_000
 
 export type UpdatableChatConfig = Partial<
-  Pick<ChatConfig, 'globalContextMd' | 'summaryTriggerTokens' | 'summaryMaxTokens'>
+  Pick<
+    ChatConfig,
+    'globalContextMd' | 'summaryTriggerTokens' | 'summaryMaxTokens' | 'maxImagesPerMessage' | 'maxImageSizeMb'
+  >
 >
 
 /**

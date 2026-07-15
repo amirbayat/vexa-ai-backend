@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import puppeteer, { Browser } from 'puppeteer'
 import { Invoice } from '@prisma/client'
+import { fa } from '../../i18n/fa'
 
 const FONT_DIR = path.join(process.cwd(), 'assets/fonts')
 
@@ -118,7 +119,7 @@ export class InvoicePdfService implements OnModuleDestroy {
       <tr><th>شرح</th><th class="amount">مبلغ (تومان)</th></tr>
     </thead>
     <tbody>
-      <tr><td>اشتراک ${escapeHtml(invoice.planName)}</td><td class="amount">${toman(invoice.amount)}</td></tr>
+      <tr><td>${escapeHtml(invoice.planName ? `اشتراک ${invoice.planName}` : fa.payment.walletTopupDescription)}</td><td class="amount">${toman(invoice.amount)}</td></tr>
     </tbody>
   </table>
 

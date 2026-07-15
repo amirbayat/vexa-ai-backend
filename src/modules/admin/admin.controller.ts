@@ -30,6 +30,12 @@ export class AdminController {
     return this.adminService.getUsers(page ? Number(page) : 1, limit ? Number(limit) : 20, search)
   }
 
+  // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۵ — نمای جزئیات کاربر (کیف‌پول/تراکنش‌ها/مصرف)
+  @Get('users/:id')
+  getUserDetail(@Param('id') id: string) {
+    return this.adminService.getUserDetail(id)
+  }
+
   @Patch('users/:id')
   updateUser(
     @Param('id') id: string,
@@ -79,6 +85,12 @@ export class AdminController {
   @Patch('users/:id/plan')
   changePlan(@Param('id') id: string, @Body() body: { planId: string }) {
     return this.adminService.changeUserPlan(id, body.planId)
+  }
+
+  // docs/PRD-pay-as-you-go-wallet.md — بازگشت وجه دستی + خروج از PAYG
+  @Post('users/:id/refund-payg')
+  refundPayg(@Param('id') id: string) {
+    return this.adminService.refundAndDeactivatePayg(id)
   }
 
   // ── Tickets ──────────────────────────────────────────────────────────────────

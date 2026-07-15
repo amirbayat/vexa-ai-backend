@@ -64,6 +64,8 @@ export interface RouteInput {
   usagePct: number // ۰ تا ۱۰۰+ — درصد مصرف بودجه‌ی روزانه
   simpleModel?: string | null // مدل ثابت پلن برای پیام‌های SIMPLE
   reasoningEffort?: string | null // پیش‌فرض reasoning effort پلن — استپ فعلی می‌تواند override کند
+  // docs/PRD-pay-as-you-go-wallet.md — بدون طبقه‌بندی/fallback پله‌ای؛ همیشه انتخاب دستی کاربر
+  isPayAsYouGo?: boolean
 }
 
 export interface RouteResult {
@@ -102,6 +104,20 @@ export class ModelRouterService {
   }
 
   async route(input: RouteInput): Promise<RouteResult> {
+    // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۳ — کلاً از مسیر classify/candidates/steps رد می‌شود:
+    // بدون طبقه‌بندی SIMPLE/MEDIUM/COMPLEX، بدون fallback پله‌ای بودجه‌ای — همیشه دقیقاً همان
+    // مدلی که کاربر انتخاب کرده (فرانت برای این پلن اصلاً حالت «بهینه» را نشان نمی‌دهد)
+    if (input.isPayAsYouGo) {
+      return {
+        modelId: input.manualModel ?? input.allowedModels[0],
+        tier: ModelTier.MEDIUM,
+        method: 'pay_as_you_go_manual',
+        confidence: 1,
+        overriddenManualModel: null,
+        reasoningEffort: input.reasoningEffort ?? null,
+      }
+    }
+
     const config = await this.getConfig()
 
     if (!config.enabled) {

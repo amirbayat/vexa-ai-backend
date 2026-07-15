@@ -9,8 +9,15 @@ import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry'
 import { PaymentGateway } from './gateways/payment-gateway.interface'
 import { fa } from '../../i18n/fa'
 import { InitiatePaymentDto } from './dto/initiate-payment.dto'
+import { InitiateWalletTopupDto } from './dto/initiate-wallet-topup.dto'
+import type { Payment, User } from '@prisma/client'
 
 const SUBSCRIPTION_DAYS = 30
+
+// docs/PRD-pay-as-you-go-wallet.md بخش ۸ سؤال ۱ — اشتراک PAYG انقضای زمانی معناداری ندارد
+// (خالی‌شدن کیف‌پول جلوی ارسال پیام را می‌گیرد، نه گذشتن این تاریخ)؛ برای این‌که schema فعلی
+// (periodEnd غیر nullable) بدون تغییر بماند، یک تاریخ خیلی دور به‌جای «بدون انقضا» گذاشته می‌شود
+const PAY_AS_YOU_GO_PERIOD_END = new Date('2099-12-31T00:00:00.000Z')
 
 @Injectable()
 export class PaymentsService {
@@ -75,6 +82,48 @@ export class PaymentsService {
     return this.registry.getEnabled().map((g) => g.toLowerCase())
   }
 
+  // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۱ — شارژ کیف‌پول، بدون planId (Payment.kind='WALLET_TOPUP')
+  async initiateWalletTopup(userId: string, dto: InitiateWalletTopupDto) {
+    const paygPlan = await this.prisma.plan.findFirst({ where: { isPayAsYouGo: true, isActive: true } })
+    if (!paygPlan) throw new BadRequestException(fa.payAsYouGo.notConfigured)
+
+    const priorTopups = await this.prisma.payment.count({
+      where: { userId, kind: 'WALLET_TOPUP', status: 'COMPLETED' },
+    })
+    const minAmount = priorTopups === 0
+      ? paygPlan.payAsYouGoMinActivationToman ?? 1_000_000
+      : paygPlan.payAsYouGoMinTopupToman ?? 500_000
+    if (dto.amountToman < minAmount) {
+      throw new BadRequestException(
+        priorTopups === 0 ? fa.payAsYouGo.minActivation(minAmount) : fa.payAsYouGo.minTopup(minAmount),
+      )
+    }
+
+    const gateway = this.registry.resolve(dto.gateway)
+    const callbackUrl = `${this.config.get('API_URL')}/api/v1/payments/callback/${gateway.name.toLowerCase()}`
+
+    this.logger.log(`initiateWalletTopup: gateway=${gateway.name} amount=${dto.amountToman}`)
+
+    const { providerRef, paymentUrl } = await gateway.createPayment({
+      amount: dto.amountToman * 10, // مرز تبدیل تومان→ریال، مثل initiate()
+      description: fa.payment.walletTopupDescription,
+      callbackUrl,
+    })
+
+    await this.prisma.payment.create({
+      data: {
+        userId,
+        kind: 'WALLET_TOPUP',
+        planId: null,
+        amount: dto.amountToman,
+        provider: gateway.name,
+        providerRef,
+      },
+    })
+
+    return { paymentUrl, providerRef }
+  }
+
   // برای دکمه‌ی «اعمال» کد تخفیف در صفحه‌ی قیمت‌گذاری — فقط اعتبارسنجی می‌کند، هیچ‌چیزی
   // مصرف/ثبت نمی‌شود (مصرف واقعی همچنان فقط داخل initiate/verify اتفاق می‌افتد)
   async validateDiscountCode(userId: string, code: string) {
@@ -137,6 +186,18 @@ export class PaymentsService {
       return { redirect: `${appUrl}/payment?status=failed` }
     }
 
+    if (payment.kind === 'WALLET_TOPUP') {
+      return this.completeWalletTopup(payment, refId!, appUrl)
+    }
+    // از این‌جا به بعد فقط مسیر SUBSCRIPTION است — payment.plan طبق ساخت (بخش initiate بالا) همیشه ست است.
+    // یک binding محلی جدید (نه فقط تصحیح در بلاک بالا) چون narrowing روی payment.plan داخل کلوژرِ
+    // $transaction پایین‌تر نگه داشته نمی‌شود — یک const تازه لازم است.
+    const plan = payment.plan
+    if (!plan) {
+      this.logger.error(`verify: SUBSCRIPTION payment ${payment.id} has no plan — data inconsistency`)
+      throw new BadRequestException(fa.payment.notFound)
+    }
+
     const now = new Date()
     const periodEnd = new Date(now.getTime() + SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000)
 
@@ -159,14 +220,14 @@ export class PaymentsService {
         where: { userId: payment.userId },
         create: {
           userId: payment.userId,
-          planId: payment.planId,
+          planId: plan.id,
           status: 'ACTIVE',
           periodStart: now,
           periodEnd,
           cancelAtPeriodEnd: false,
         },
         update: {
-          planId: payment.planId,
+          planId: plan.id,
           status: 'ACTIVE',
           periodStart: now,
           periodEnd,
@@ -182,7 +243,7 @@ export class PaymentsService {
         data: {
           paymentId: payment.id,
           userId: payment.userId,
-          planName: payment.plan.name,
+          planName: plan.name,
           amount: payment.amount,
           provider: payment.provider,
           refId: refId!,
@@ -202,6 +263,83 @@ export class PaymentsService {
         this.logger.error(`referral reward issuance failed for payment=${payment.id}`, err),
       )
     }
+
+    return { redirect: `${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}` }
+  }
+
+  // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۱ — شارژ موفق: کیف‌پول credit می‌شود، و فقط اگر این
+  // اولین شارژ موفق کاربر بوده باشد، اشتراکش به پلن PAYG سوییچ/فعال می‌شود
+  private async completeWalletTopup(
+    payment: Payment & { user: User },
+    refId: string,
+    appUrl: string | undefined,
+  ) {
+    const priorTopups = await this.prisma.payment.count({
+      where: { userId: payment.userId, kind: 'WALLET_TOPUP', status: 'COMPLETED' },
+    })
+    const isFirstTopup = priorTopups === 0
+
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: { status: 'COMPLETED', refId },
+      })
+
+      const wallet = await tx.wallet.upsert({
+        where: { userId: payment.userId },
+        create: { userId: payment.userId, balanceToman: payment.amount },
+        update: { balanceToman: { increment: payment.amount } },
+      })
+      await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'CREDIT',
+          amountToman: payment.amount,
+          description: fa.payment.walletTopupDescription,
+          metadata: { paymentId: payment.id },
+        },
+      })
+
+      if (isFirstTopup) {
+        const paygPlan = await tx.plan.findFirst({ where: { isPayAsYouGo: true, isActive: true } })
+        if (paygPlan) {
+          await tx.subscription.upsert({
+            where: { userId: payment.userId },
+            create: {
+              userId: payment.userId,
+              planId: paygPlan.id,
+              status: 'ACTIVE',
+              periodStart: new Date(),
+              periodEnd: PAY_AS_YOU_GO_PERIOD_END,
+              cancelAtPeriodEnd: false,
+            },
+            update: {
+              planId: paygPlan.id,
+              status: 'ACTIVE',
+              periodStart: new Date(),
+              periodEnd: PAY_AS_YOU_GO_PERIOD_END,
+              cancelAtPeriodEnd: false,
+            },
+          })
+        }
+      }
+
+      return tx.invoice.create({
+        data: {
+          paymentId: payment.id,
+          userId: payment.userId,
+          planName: null, // WALLET_TOPUP پلنی ندارد — invoice-pdf.service.ts در نبود planName برچسب «شارژ کیف‌پول» را نشان می‌دهد
+          amount: payment.amount,
+          provider: payment.provider,
+          refId,
+          buyerName: payment.user.name,
+          buyerPhone: payment.user.phone,
+        },
+      })
+    })
+
+    await this.tokenService.invalidatePlanCache(payment.userId)
+    this.logger.log(`completeWalletTopup: wallet credited ${payment.amount} for user=${payment.userId}, invoice=${invoice.id}`)
 
     return { redirect: `${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}` }
   }

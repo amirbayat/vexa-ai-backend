@@ -50,9 +50,18 @@ export const fa = {
     notFound: 'پرداخت یافت نشد',
     invalidStatus: 'وضعیت پرداخت نامعتبر است',
     description: (planName: string) => `خرید اشتراک ${planName}`,
+    walletTopupDescription: 'شارژ کیف‌پول',
     gatewayError: 'خطا در اتصال به درگاه پرداخت',
     gatewayRequired: 'انتخاب درگاه پرداخت الزامی است',
     gatewayNotEnabled: 'این درگاه پرداخت فعال نیست',
+  },
+  payAsYouGo: {
+    notConfigured: 'پلن Pay-as-you-go در حال حاضر تنظیم نشده است',
+    minActivation: (min: number) => `برای فعال‌سازی اولیه حداقل باید ${min.toLocaleString('fa-IR')} تومان شارژ کنید`,
+    minTopup: (min: number) => `حداقل مبلغ شارژ ${min.toLocaleString('fa-IR')} تومان است`,
+    insufficientBalance: 'موجودی کیف‌پول کافی نیست. لطفاً شارژ کنید',
+    messageDebitDescription: 'مصرف پیام چت (Pay-as-you-go)',
+    adminRefundDescription: 'بازگشت وجه توسط ادمین (خروج از Pay-as-you-go)',
   },
   invoice: {
     notFound: 'فاکتور یافت نشد',
@@ -140,5 +149,11 @@ export const fa = {
   networkOutage: {
     alreadyOpen: 'یک قطعی از قبل ثبت شده و هنوز پایان نیافته است',
     noneOpen: 'هیچ قطعی بازی برای پایان دادن وجود ندارد',
+  },
+  chatImages: {
+    tooMany: (max: number) => `حداکثر ${max.toLocaleString('fa-IR')} عکس در هر پیام مجاز است`,
+    invalidFormat: 'فرمت عکس نامعتبر است — فقط PNG/JPEG/WEBP/GIF مجاز است',
+    tooLarge: (maxMb: number) => `حجم هر عکس نباید بیشتر از ${maxMb.toLocaleString('fa-IR')} مگابایت باشد`,
+    contentMismatch: 'محتوای عکس با فرمت اعلام‌شده مطابقت ندارد',
   },
 } as const

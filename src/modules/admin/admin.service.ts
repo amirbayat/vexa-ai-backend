@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { ExchangeRateService } from '../../exchange-rate/exchange-rate.service'
+import { PricingService } from '../usage/pricing.service'
 import { fa } from '../../i18n/fa'
 import { CreateModelDto, MODEL_TIERS, TOKENIZER_FAMILIES } from './dto/create-model.dto'
 import { UpdateModelDto } from './dto/update-model.dto'
@@ -80,6 +81,7 @@ export class AdminService {
     private readonly redis: RedisService,
     private readonly config: ConfigService,
     private readonly exchangeRate: ExchangeRateService,
+    private readonly pricingService: PricingService,
   ) {
     // همون درصدی که PricingService برای بودجه‌ی واقعی مصرف می‌کند — برای اینکه
     // «انتظار مصرف» ادمین با محدودیت واقعی چت هماهنگ بماند، نه یک 0.7 هاردکد جدا
@@ -197,6 +199,57 @@ export class AdminService {
     })
 
     return { users: enriched, total, page, limit }
+  }
+
+  // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۵ — اولین drill-down واقعی این صفحه؛ قبلاً فقط
+  // جدول تخت بود، wallet هم اصلاً select نمی‌شد
+  async getUserDetail(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        phone: true,
+        name: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+        lifetimeMessageCount: true,
+        subscription: {
+          select: { status: true, periodStart: true, periodEnd: true, plan: true },
+        },
+        wallet: { select: { id: true, balanceToman: true } },
+      },
+    })
+    if (!user) throw new NotFoundException(fa.users.notFound)
+
+    const [walletTransactions, payments, dailyUsage] = await Promise.all([
+      user.wallet
+        ? this.prisma.walletTransaction.findMany({
+            where: { walletId: user.wallet.id },
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+          })
+        : [],
+      this.prisma.payment.findMany({
+        where: { userId },
+        include: { plan: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+      this.prisma.dailyUsage.findMany({
+        where: { userId },
+        orderBy: { date: 'desc' },
+        take: 30,
+      }),
+    ])
+
+    return {
+      user,
+      walletBalanceToman: user.wallet?.balanceToman ?? 0,
+      walletTransactions,
+      payments,
+      dailyUsage,
+    }
   }
 
   async updateUser(userId: string, data: { isActive?: boolean; role?: 'USER' | 'ADMIN' }) {
@@ -367,6 +420,24 @@ export class AdminService {
     await this.redis.del(`plan:${userId}`)
 
     return { success: true, subscription: sub }
+  }
+
+  // docs/PRD-pay-as-you-go-wallet.md — بازگشت وجه دستی (پول واقعی را خودِ ادمین خارج از این
+  // سیستم برمی‌گرداند): موجودی کیف‌پول صفر و به‌عنوان تراکنش ثبت می‌شود، و کاربر از پلن PAYG
+  // خارج و به پلن رایگان سوییچ می‌شود — مبلغ دقیق برگردانده‌شده برای انجام واقعی به ادمین نشان داده می‌شود
+  async refundAndDeactivatePayg(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } })
+    if (!user) throw new NotFoundException(fa.admin.userNotFound)
+
+    const refundedAmountToman = await this.pricingService.refundWallet(userId, fa.payAsYouGo.adminRefundDescription)
+
+    const freePlan = await this.prisma.plan.findFirst({
+      where: { priceMonthly: 0, isActive: true },
+      orderBy: { sortOrder: 'asc' },
+    })
+    if (freePlan) await this.changeUserPlan(userId, freePlan.id)
+
+    return { refundedAmountToman, downgradedToFreePlan: Boolean(freePlan) }
   }
 
   async getRevenueStats() {

@@ -28,6 +28,12 @@ export class UsageController {
     return this.pricingService.getBudgetStatus(user.sub, plan.priceMonthly, plan.planTier)
   }
 
+  // docs/PRD-pay-as-you-go-wallet.md — صفحه‌ی «کیف‌پول» کاربر (موجودی + تاریخچه‌ی تراکنش‌ها)
+  @Get('wallet')
+  getWallet(@CurrentUser() user: JwtPayload) {
+    return this.pricingService.getWalletDetail(user.sub)
+  }
+
   @Get('message-quota')
   async getMessageQuota(@CurrentUser() user: JwtPayload) {
     const plan = await this.tokenService.getCachedPlan(user.sub)

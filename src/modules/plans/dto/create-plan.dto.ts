@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator'
+import { IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator'
 import { fa } from '../../../i18n/fa'
 import { REASONING_EFFORT_VALUES } from '../reasoning-effort.constants'
 
@@ -119,4 +119,29 @@ export class CreatePlanDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
   trialRollingWindowHours?: number | null
+
+  // docs/PRD-pay-as-you-go-wallet.md
+  @IsOptional()
+  @IsBoolean({ message: fa.validation.mustBeBoolean })
+  isPayAsYouGo?: boolean
+
+  @IsOptional()
+  @IsNumber({}, { message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  payAsYouGoMarkup?: number
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(0, { message: fa.validation.numberPositive })
+  payAsYouGoMinActivationToman?: number
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(0, { message: fa.validation.numberPositive })
+  payAsYouGoMinTopupToman?: number
+
+  @IsOptional()
+  @IsArray({ message: fa.validation.mustBeArray })
+  @IsInt({ each: true, message: fa.validation.mustBeNumber })
+  payAsYouGoTopupPresets?: number[]
 }

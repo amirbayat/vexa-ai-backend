@@ -41,6 +41,9 @@ export interface PlanLimits {
   trialThrottledMessageCount: number | null
   trialRollingWindowLimit: number | null
   trialRollingWindowHours: number | null
+  // docs/PRD-pay-as-you-go-wallet.md — بدون بودجه‌ی درصدی/fallback پله‌ای؛ مصرف واقعی از کیف‌پول کم می‌شود
+  isPayAsYouGo: boolean
+  payAsYouGoMarkup: number | null
 }
 
 // Iran Standard Time = UTC+3:30 (no DST)
@@ -245,7 +248,11 @@ export class TokenService {
   }
 
   // resolve maxInputTokens: env wins over DB plan value
+  // docs/PRD-pay-as-you-go-wallet.md — PAYG صریحاً از سقف‌های env سطح‌بندی‌شده (free/pro/premium)
+  // مستقل است؛ تشخیص tier بر اساس زیررشته‌ی نام پلن (detectTier) شکننده است و نباید سقف ورودی
+  // یک پلن پولی/مصرفی را به‌اشتباه به MAX_INPUT_TOKENS_FREE محدود کند
   resolveInputLimit(plan: PlanLimits): number {
+    if (plan.isPayAsYouGo) return plan.maxInputTokens
     const envKey = TIER_INPUT_LIMITS[plan.planTier]
     if (envKey) {
       const envVal = this.config.get<string>(envKey)
@@ -330,6 +337,8 @@ export class TokenService {
         trialThrottledMessageCount: sub.plan.trialThrottledMessageCount ?? null,
         trialRollingWindowLimit: sub.plan.trialRollingWindowLimit ?? null,
         trialRollingWindowHours: sub.plan.trialRollingWindowHours ?? null,
+        isPayAsYouGo: sub.plan.isPayAsYouGo,
+        payAsYouGoMarkup: sub.plan.payAsYouGoMarkup ?? null,
       }
     } else {
       // no subscription → look up the active free plan from DB instead of hardcoded defaults
@@ -361,6 +370,8 @@ export class TokenService {
         trialThrottledMessageCount: freePlan?.trialThrottledMessageCount ?? null,
         trialRollingWindowLimit: freePlan?.trialRollingWindowLimit ?? null,
         trialRollingWindowHours: freePlan?.trialRollingWindowHours ?? null,
+        isPayAsYouGo: false,
+        payAsYouGoMarkup: null,
       }
     }
 

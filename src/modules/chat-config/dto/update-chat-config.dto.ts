@@ -16,4 +16,16 @@ export class UpdateChatConfigDto {
   @Min(50)
   @Max(4096)
   summaryMaxTokens?: number
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  maxImagesPerMessage?: number
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  maxImageSizeMb?: number
 }
