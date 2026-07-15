@@ -845,6 +845,20 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     const baseUrl = this.config.get<string>('LIARA_AI_BASE_URL')!
     const apiKey = this.config.get<string>('LIARA_API_KEY')!
     const isFormData = body instanceof FormData
+    // بعضی مدل‌ها (تأیید شده برای gpt-image-1-mini روی گیت‌وی ما) اصلاً stream/partial_images
+    // را قبول نمی‌کنند و با خطا رد می‌کنند — این پرچم اجازه می‌دهد بدون stream دوباره تلاش کنیم
+    // به‌جای اینکه کل تولید عکس fail شود
+    let streaming = Boolean(onPartial)
+
+    const stripStreamingParams = () => {
+      if (isFormData) {
+        (body as FormData).delete('stream')
+        ;(body as FormData).delete('partial_images')
+      } else {
+        delete (body as Record<string, unknown>).stream
+        delete (body as Record<string, unknown>).partial_images
+      }
+    }
 
     const doFetch = () =>
       fetch(`${baseUrl}${path}`, {
@@ -872,23 +886,36 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     }
 
     if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      let code: string | null = null
-      let message = text.slice(0, 300)
-      try {
-        const errJson = JSON.parse(text) as { error?: { code?: string; type?: string; message?: string } }
-        code = errJson.error?.code ?? errJson.error?.type ?? null
-        message = errJson.error?.message ?? message
-      } catch {
-        // بدنه‌ی خطا JSON نبود — همون متن خام کافیه
+      let text = await res.text().catch(() => '')
+      // بعضی مدل‌ها اصلاً stream/partial_images را قبول نمی‌کنند — به‌جای fail کردن کل تولید
+      // عکس، بدون streaming دوباره تلاش می‌کنیم (پیش‌نمایش تدریجی را برای این یک مدل از دست
+      // می‌دهیم، ولی خودِ تولید عکس کار می‌کند)
+      if (streaming && /does not support streaming|streaming.*not supported/i.test(text)) {
+        this.logger.warn(`${path}: model doesn't support streaming, retrying without partial_images`)
+        streaming = false
+        stripStreamingParams()
+        res = await doFetch()
+        if (!res.ok) text = await res.text().catch(() => '')
       }
-      // gpt-image family این کدها را برای رد شدن به‌خاطر سیاست محتوا برمی‌گرداند — تشخیصش لازم است
-      // تا به کاربر بگیم «prompt رو عوض کن»، نه یک پیام خطای عمومی/گیج‌کننده
-      const isPolicyViolation = /moderation|policy|safety/i.test(`${code ?? ''} ${message}`)
-      throw new ImageApiError(message, code, isPolicyViolation)
+
+      if (!res.ok) {
+        let code: string | null = null
+        let message = text.slice(0, 300)
+        try {
+          const errJson = JSON.parse(text) as { error?: { code?: string; type?: string; message?: string } }
+          code = errJson.error?.code ?? errJson.error?.type ?? null
+          message = errJson.error?.message ?? message
+        } catch {
+          // بدنه‌ی خطا JSON نبود — همون متن خام کافیه
+        }
+        // gpt-image family این کدها را برای رد شدن به‌خاطر سیاست محتوا برمی‌گرداند — تشخیصش لازم است
+        // تا به کاربر بگیم «prompt رو عوض کن»، نه یک پیام خطای عمومی/گیج‌کننده
+        const isPolicyViolation = /moderation|policy|safety/i.test(`${code ?? ''} ${message}`)
+        throw new ImageApiError(message, code, isPolicyViolation)
+      }
     }
 
-    if (!onPartial) {
+    if (!streaming) {
       const json = (await res.json()) as {
         data?: Array<{ b64_json?: string }>
         usage?: {
@@ -941,7 +968,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
             }
           }
           if (evt.type === 'image_generation.partial_image' && evt.b64_json) {
-            onPartial(evt.b64_json)
+            onPartial?.(evt.b64_json)
           } else if (evt.type === 'image_generation.completed' && evt.b64_json) {
             finalBase64 = evt.b64_json
             usage = {
