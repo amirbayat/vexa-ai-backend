@@ -24,10 +24,12 @@ export class CreateModelDto {
   @Min(0)
   inputPricePerM!: number
 
+  // برای مدل‌های IMAGE_GEN بی‌ربط است (متن خروجی تولید نمی‌کنند) — اختیاری، پیش‌فرض ۰ (schema)
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  outputPricePerM!: number
+  outputPricePerM?: number
 
   @IsOptional()
   @IsBoolean()
