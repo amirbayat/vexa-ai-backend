@@ -466,12 +466,17 @@ model AiModel {
   outputPricePerM Float       @default(0)
   supportsVision  Boolean     @default(false)
   supportsImageGen Boolean    @default(false) // docs/PRD-chat-images.md — تولید عکس
-  imageGenPriceUsd Float? // دلار — قیمت دقیق «این ردیف مشخص» (یعنی همین ترکیب quality+size پایین) — چون
-  // قیمت‌گذاری مدل‌های خانواده‌ی gpt-image بر اساس quality×size یک جدول است، نه یک عدد ثابت
-  // (مثلاً Low/1024x1024=$0.005 در برابر High/1024x1024=$0.036) — هر ترکیب باید ردیف AiModel جدا
-  // با نام/قیمت خودش باشد تا محاسبه‌ی هزینه دقیق بماند
+  // قیمت‌گذاری تولید عکس بر اساس توکن واقعی مصرف‌شده است (نه یک عدد ثابت هر عکس) — درست مثل
+  // مدل‌های چت. سه نرخ لازم است چون هر کدام یک نوع توکن جدا است:
+  //   ۱) متن ورودی (prompt) → همان inputPricePerM بالا دوباره استفاده می‌شود
+  //   ۲) عکس ورودی (فقط حالت ویرایش/edit، وقتی کاربر عکس می‌دهد) → imageGenInputImagePricePerM
+  //   ۳) عکس خروجی (تصویر تولیدشده) → imageGenOutputImagePricePerM
+  // هزینه‌ی هر درخواست از usage واقعی پاسخ provider محاسبه می‌شود (chat.service.ts —
+  // generateImageRaw/editImageRaw)، نه از این نرخ‌ها به‌تنهایی؛ این‌ها فقط قیمت هر ۱M توکن‌اند.
+  imageGenInputImagePricePerM  Float?
+  imageGenOutputImagePricePerM Float?
   imageGenQuality  String? // دقیقاً همان رشته‌ای که به provider پاس داده می‌شود — مثل "low"/"medium"/"high" (خانواده‌ی gpt-image) یا "standard"/"hd" (dall-e-3)
-  imageGenSize     String? // مثل "1024x1024" — مستقیم به generateImage({size}) پاس داده می‌شود
+  imageGenSize     String? // مثل "1024x1024" — مستقیم به provider پاس داده می‌شود
   isActive        Boolean     @default(true)
   sortOrder       Int         @default(0)
   tier            ModelTier   @default(MEDIUM)

@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config'
 import * as crypto from 'crypto'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText, generateImage, generateObject, APICallError, RetryError } from 'ai'
+import { streamText, generateObject, APICallError, RetryError } from 'ai'
 import type { ModelMessage, UserModelMessage } from 'ai'
 import { ModelTier, type AiModel } from '@prisma/client'
 import { z } from 'zod'
@@ -693,16 +693,118 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     })
   }
 
+  // تخمین محافظه‌کارانه (نه دقیق) — چون هزینه‌ی واقعی فقط بعد از دریافت usage از provider معلوم
+  // می‌شود، برای پیش‌چک PAYG (قبل از فراخوانی) باید یک سقفِ بدترین‌حالت تخمین بزنیم. عمداً
+  // بزرگ‌تر از واقعیت است تا کاربر رد نشود از قلم بیفتد و بعداً موجودی‌اش منفی شود.
+  // اعداد توکن خروجی از مستندات OpenAI برای gpt-image (low/medium/high در 1024×1024) گرفته شده؛
+  // برای ابعاد غیرمربعی یا مدل‌های دیگر همچنان یک سقفِ بالا (نه دقیق) کافی است.
+  private estimateWorstCaseImageUsd(model: AiModel, hasInputImages: boolean): number {
+    const OUTPUT_TOKENS_BY_TIER: Record<string, number> = { SIMPLE: 300, MEDIUM: 1100, COMPLEX: 4200 }
+    const outputTokens = OUTPUT_TOKENS_BY_TIER[model.tier] ?? 4200
+    const textTokens = 300 // سقف بالا برای یک prompt معمولی
+    const imageInputTokens = hasInputImages ? 1500 : 0 // فقط حالت ویرایش — تخمین سقف بالا هر عکس ورودی
+    return (
+      (textTokens * model.inputPricePerM) / 1_000_000 +
+      (imageInputTokens * (model.imageGenInputImagePricePerM ?? 0)) / 1_000_000 +
+      (outputTokens * (model.imageGenOutputImagePricePerM ?? 0)) / 1_000_000
+    )
+  }
+
   private async firstAffordable(
     rankedCandidates: AiModel[],
     balanceToman: number,
     markup: number,
+    hasInputImages: boolean,
   ): Promise<AiModel | null> {
     for (const candidate of rankedCandidates) {
-      const { costToman } = await this.pricingService.calcFlatCostToman(candidate.imageGenPriceUsd ?? 0)
+      const { costToman } = await this.pricingService.calcFlatCostToman(
+        this.estimateWorstCaseImageUsd(candidate, hasInputImages),
+      )
       if (balanceToman >= Math.ceil(costToman * markup)) return candidate
     }
     return null
+  }
+
+  private async callImagesApi(
+    path: '/images/generations' | '/images/edits',
+    body: Record<string, unknown> | FormData,
+  ): Promise<{
+    base64: string
+    usage: { textInputTokens: number; imageInputTokens: number; outputTokens: number }
+  }> {
+    const baseUrl = this.config.get<string>('LIARA_AI_BASE_URL')!
+    const apiKey = this.config.get<string>('LIARA_API_KEY')!
+    const isFormData = body instanceof FormData
+
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      },
+      body: isFormData ? body : JSON.stringify(body),
+      signal: AbortSignal.timeout(120_000),
+    })
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`Liara images API ${path} failed (${res.status}): ${text.slice(0, 300)}`)
+    }
+
+    const json = (await res.json()) as {
+      data?: Array<{ b64_json?: string }>
+      usage?: {
+        input_tokens_details?: { text_tokens?: number; image_tokens?: number }
+        output_tokens?: number
+      }
+    }
+    const base64 = json.data?.[0]?.b64_json
+    if (!base64) throw new Error(`Liara images API ${path} returned no image data`)
+
+    return {
+      base64,
+      // اگر provider اصلاً usage برنگرداند (بعضی مدل‌ها/gatewayها ممکن است ندهند)، صفر می‌شود —
+      // یعنی آن بخش هزینه صفر حساب می‌شود؛ بهتر از crash کردن، ولی باید توی لاگ مشخص باشد
+      usage: {
+        textInputTokens: json.usage?.input_tokens_details?.text_tokens ?? 0,
+        imageInputTokens: json.usage?.input_tokens_details?.image_tokens ?? 0,
+        outputTokens: json.usage?.output_tokens ?? 0,
+      },
+    }
+  }
+
+  // تولید از صفر — بدون عکس ورودی (docs: /v1/images/generations)
+  private async generateImageRaw(params: { modelId: string; prompt: string; size?: string; quality?: string }) {
+    return this.callImagesApi('/images/generations', {
+      model: params.modelId,
+      prompt: params.prompt,
+      n: 1,
+      ...(params.size ? { size: params.size } : {}),
+      ...(params.quality ? { quality: params.quality } : {}),
+    })
+  }
+
+  // ویرایش/ترکیب چند عکس موجود با یک prompt (docs: /v1/images/edits) — کاربر خودش عکس(ها) را
+  // فرستاده و می‌خواهد ویرایش/ترکیب شوند، نه یک تصویر کاملاً جدید
+  private async editImageRaw(params: {
+    modelId: string
+    prompt: string
+    images: Buffer[]
+    size?: string
+    quality?: string
+  }) {
+    const form = new FormData()
+    form.append('model', params.modelId)
+    form.append('prompt', params.prompt)
+    if (params.size) form.append('size', params.size)
+    if (params.quality) form.append('quality', params.quality)
+    // فرمت چندفایلی استاندارد multipart — یک فایل: کلید ساده «image»، چند فایل: کلید تکرارشونده‌ی
+    // «image[]» (همون قراردادی که OpenAI/gpt-image-1 می‌پذیرد)
+    const imageKey = params.images.length > 1 ? 'image[]' : 'image'
+    params.images.forEach((buf, i) => {
+      form.append(imageKey, new Blob([new Uint8Array(buf)], { type: 'image/png' }), `image-${i}.png`)
+    })
+    return this.callImagesApi('/images/edits', form)
   }
 
   // docs/PRD-chat-images.md بخش ۵.۵ — مسیر تولید عکس: مستقل از streamText/Router. نتیجه یک‌جا
@@ -718,6 +820,10 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     // اولویت است — راه فرار برای انتخاب دقیق. وگرنه (حالت پیش‌فرض/تشخیص ضمنی)، خودمان از روی
     // متن پیام تشخیص می‌دهیم این عکس چقدر باید پیچیده/باکیفیت باشد و بین ردیف‌های موجود
     // (که ممکن است چند سطح کیفیت/قیمت مختلف از یک یا چند مدل باشند) بهترین را انتخاب می‌کنیم.
+    // اگر کاربر عکس هم فرستاده باشد، این یک درخواست «ویرایش/ترکیب» است (images/edits) نه تولید
+    // از صفر — دقیقاً مثل مثال gpt-image-1-mini (چند عکس ورودی + prompt → یک عکس جدید)
+    const hasInputImages = Boolean(dto.images?.length)
+
     const requestedModel = dto.model && dto.model !== OPTIMAL_MODE ? resolveModelId(dto.model) : undefined
     const explicitModelRecord =
       requestedModel && plan.allowedModels.includes(requestedModel)
@@ -746,7 +852,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         // برایش کافی است انتخاب می‌شود — بهترین کیفیتی که کاربر واقعاً می‌تواند بپردازد،
         // نه لزوماً ارزان‌ترین. اگر even ارزان‌ترین گزینه هم کافی نبود، یعنی هیچ‌کدام از
         // کل لیست (با هر ترتیبی) قابل‌پرداخت نیست
-        const affordable = await this.firstAffordable(ranked, balance, markup)
+        const affordable = await this.firstAffordable(ranked, balance, markup, hasInputImages)
         if (!affordable) {
           throw new HttpException(
             { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
@@ -762,7 +868,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       // فقط چک می‌کنیم کیف‌پول کافی هست یا نه
       const markup = plan.payAsYouGoMarkup ?? 1.3
       const balance = await this.pricingService.getWalletBalance(userId)
-      const affordable = await this.firstAffordable([modelRecord], balance, markup)
+      const affordable = await this.firstAffordable([modelRecord], balance, markup, hasInputImages)
       if (!affordable) {
         throw new HttpException(
           { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
@@ -771,7 +877,6 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       }
     }
     const modelId = modelRecord.name
-    const priceUsd = modelRecord.imageGenPriceUsd ?? 0
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
@@ -783,29 +888,32 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     const callStart = Date.now()
 
     try {
-      // size/quality دقیقاً باید همان چیزی باشد که قیمت‌گذاری این ردیف (imageGenPriceUsd) بر
-      // اساسش تعیین شده — مثلاً قیمت مدل‌های خانواده‌ی gpt-image جدولی است (quality×size)، نه ثابت؛
-      // اگر این پارامترها پاس داده نشوند، provider مقدار پیش‌فرض خودش را استفاده می‌کند که ممکن است
-      // با priceUsd همین ردیف هم‌خوان نباشد
-      const result = await generateImage({
-        model: this.provider.imageModel(modelId),
-        prompt: dto.content,
-        ...(modelRecord.imageGenSize
-          ? { size: modelRecord.imageGenSize as `${number}x${number}` }
-          : {}),
-        ...(modelRecord.imageGenQuality
-          ? { providerOptions: { liara: { quality: modelRecord.imageGenQuality } } }
-          : {}),
-      })
+      const result = hasInputImages
+        ? await this.editImageRaw({
+            modelId,
+            prompt: dto.content,
+            images: (dto.images ?? [])
+              .map((dataUrl) => parseChatImageDataUrl(dataUrl))
+              .filter((p): p is NonNullable<typeof p> => p !== null)
+              .map((p) => p.buffer),
+            size: modelRecord.imageGenSize ?? undefined,
+            quality: modelRecord.imageGenQuality ?? undefined,
+          })
+        : await this.generateImageRaw({
+            modelId,
+            prompt: dto.content,
+            size: modelRecord.imageGenSize ?? undefined,
+            quality: modelRecord.imageGenQuality ?? undefined,
+          })
       this.liveStats.recordLiaraCall('chat', true, Date.now() - callStart).catch(() => {})
 
-      const { costToman, costUsdMicros } = await this.pricingService.calcFlatCostToman(priceUsd)
-      const ext = result.image.mediaType.split('/')[1] ?? 'png'
-      const buffer = Buffer.from(result.image.base64, 'base64')
+      const { costToman, costUsdMicros, costInputUsdMicros, costOutputUsdMicros } =
+        await this.pricingService.calcImageGenCost(result.usage, modelRecord)
+      const buffer = Buffer.from(result.base64, 'base64')
 
       let imageKey: string | null = null
       try {
-        imageKey = await this.storageService.uploadImage(buffer, ext, conversationId)
+        imageKey = await this.storageService.uploadImage(buffer, 'png', conversationId)
       } catch (err) {
         this.logger.warn(`MinIO upload failed for generated image: ${(err as Error).message}`)
       }
@@ -819,6 +927,8 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           ...(imageKey ? { images: [imageKey] } : {}),
           costToman,
           costUsdMicros,
+          costInputUsdMicros,
+          costOutputUsdMicros,
           model: modelId,
         },
       })
@@ -844,7 +954,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           .catch((err) => this.logger.error(`debitWallet failed (image-gen) for user=${userId}`, err))
       }
 
-      const dataUrl = `data:${result.image.mediaType};base64,${result.image.base64}`
+      const dataUrl = `data:image/png;base64,${result.base64}`
       res.write(
         `data: ${JSON.stringify({ info: 'image-generated', image: dataUrl, messageId: assistantMessage.id })}\n\n`,
       )

@@ -38,13 +38,19 @@ export class CreateModelDto {
   @IsBoolean()
   supportsImageGen?: boolean
 
-  // قیمت دقیق همین ترکیب quality+size — docs/PRD-chat-images.md؛ چون قیمت مدل‌های تولید عکس
-  // (خانواده‌ی gpt-image) جدولی است، نه یک عدد ثابت
+  // قیمت‌گذاری تولید عکس بر اساس توکن واقعی است — متن ورودی از همون inputPricePerM بالا
+  // حساب می‌شود؛ این دو فقط برای توکن‌های عکس (ورودی حالت ویرایش / خروجی) هستند
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  imageGenPriceUsd?: number
+  imageGenInputImagePricePerM?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  imageGenOutputImagePricePerM?: number
 
   @IsOptional()
   @IsString()

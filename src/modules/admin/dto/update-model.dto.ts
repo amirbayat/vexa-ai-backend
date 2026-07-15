@@ -44,7 +44,13 @@ export class UpdateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  imageGenPriceUsd?: number
+  imageGenInputImagePricePerM?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  imageGenOutputImagePricePerM?: number
 
   @IsOptional()
   @IsString()

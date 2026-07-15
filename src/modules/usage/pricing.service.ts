@@ -93,13 +93,36 @@ export class PricingService {
     }
   }
 
-  // docs/PRD-chat-images.md بخش ۵.۵ — تولید عکس هزینه‌ی ثابت هر عکس دارد (AiModel.imageGenPriceUsd)،
-  // نه هزینه‌ی توکنی؛ همون تبدیل نرخ ارز calcCost را بدون محاسبه‌ی توکن دوباره استفاده می‌کند
+  // برای تخمین preflight (قبل از فراخوانی واقعی provider) — وقتی فقط یک عدد دلاری تخمینی داریم،
+  // نه usage واقعی هنوز
   async calcFlatCostToman(usdCost: number): Promise<{ costToman: number; costUsdMicros: number }> {
     const rate = await this.exchangeRate.getUsdtToman()
     return {
       costToman: Math.ceil(usdCost * rate),
       costUsdMicros: Math.round(usdCost * 1_000_000),
+    }
+  }
+
+  // تولید/ویرایش عکس بر اساس usage واقعیِ برگشتی از provider حساب می‌شود (نه یک عدد ثابت هر عکس) —
+  // سه نوع توکن جدا: متن ورودی (همون inputPricePerM مدل)، عکس ورودی (فقط حالت ویرایش)، عکس خروجی
+  async calcImageGenCost(
+    usage: { textInputTokens: number; imageInputTokens: number; outputTokens: number },
+    model: {
+      inputPricePerM: number
+      imageGenInputImagePricePerM: number | null
+      imageGenOutputImagePricePerM: number | null
+    },
+  ): Promise<CostCalc> {
+    const textInputUsd = (usage.textInputTokens * model.inputPricePerM) / 1_000_000
+    const imageInputUsd = (usage.imageInputTokens * (model.imageGenInputImagePricePerM ?? 0)) / 1_000_000
+    const imageOutputUsd = (usage.outputTokens * (model.imageGenOutputImagePricePerM ?? 0)) / 1_000_000
+    const usdCost = textInputUsd + imageInputUsd + imageOutputUsd
+    const rate = await this.exchangeRate.getUsdtToman()
+    return {
+      costToman: Math.ceil(usdCost * rate),
+      costUsdMicros: Math.round(usdCost * 1_000_000),
+      costInputUsdMicros: Math.round((textInputUsd + imageInputUsd) * 1_000_000),
+      costOutputUsdMicros: Math.round(imageOutputUsd * 1_000_000),
     }
   }
 
