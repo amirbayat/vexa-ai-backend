@@ -39,15 +39,21 @@ export class StorageService implements OnModuleInit {
   }
 
   // کلید تصادفی UUID — غیرقابل‌حدس، چون MinIO خصوصی نیست تضمین امنیتی محسوب نمی‌شود ولی
-  // presigned URL (نه public bucket) واقعی جلوگیری از دسترسی غیرمجاز است (بخش ۳.۲ PRD)
-  async uploadImage(buffer: Buffer, ext: string): Promise<string> {
-    const key = `${crypto.randomUUID()}.${ext}`
+  // presigned URL (نه public bucket) واقعی جلوگیری از دسترسی غیرمجاز است (بخش ۳.۲ PRD).
+  // conversationId به‌عنوان پیشوند (پوشه‌ی مجازی در S3) اضافه می‌شود تا عکس‌های یک مکالمه
+  // کنار هم باشند — هم برای مرور دستی توی کنسول، هم برای حذف دسته‌ای بعداً (مثلاً وقتی مکالمه پاک می‌شود)
+  async uploadImage(buffer: Buffer, ext: string, conversationId?: string): Promise<string> {
+    const key = `${conversationId ? `${conversationId}/` : ''}${crypto.randomUUID()}.${ext}`
     await this.client.putObject(this.bucket, key, buffer)
     return key
   }
 
   async presignedGetUrl(key: string): Promise<string> {
     return this.client.presignedGetObject(this.bucket, key, PRESIGN_EXPIRY_SECONDS)
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    await this.client.removeObject(this.bucket, key)
   }
 
   // رشته‌های قدیمی هنوز base64 خام هستند (data:image/...)؛ کلیدهای MinIO این‌طور نیستند —

@@ -6,6 +6,7 @@ const FLUSH_CRON = '*/5 * * * *'
 const SUMMARY_CRON = '0 2 * * *'
 const MODEL_FEEDBACK_SUMMARY_CRON = '0 3 * * *' // یک ساعت بعد از فیدبک عمومی، تا فشار هم‌زمان روی AI provider نباشد
 const WAITLIST_REMINDER_CRON = '0 9 * * *' // ساعت ۹ صبح — پیامک یادآوری در ساعت معقولی برسد
+const CHAT_IMAGE_CLEANUP_CRON = '15 * * * *' // ساعتی یک‌بار — عکس‌های چت قدیمی‌تر از ۲۴ ساعت حذف می‌شوند
 
 @Injectable()
 export class QueueService implements OnApplicationBootstrap {
@@ -19,6 +20,8 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly modelFeedbackSummaryQueue: Queue,
     @InjectQueue('waitlist-reminder')
     private readonly waitlistReminderQueue: Queue,
+    @InjectQueue('chat-image-cleanup')
+    private readonly chatImageCleanupQueue: Queue,
   ) {}
 
   async onApplicationBootstrap() {
@@ -69,5 +72,16 @@ export class QueueService implements OnApplicationBootstrap {
       { repeat: { cron: WAITLIST_REMINDER_CRON } },
     )
     this.logger.log(`Waitlist reminder job scheduled: ${WAITLIST_REMINDER_CRON}`)
+
+    const chatImageCleanupRepeatables = await this.chatImageCleanupQueue.getRepeatableJobs()
+    for (const job of chatImageCleanupRepeatables) {
+      await this.chatImageCleanupQueue.removeRepeatableByKey(job.key)
+    }
+    await this.chatImageCleanupQueue.add(
+      'cleanup',
+      {},
+      { repeat: { cron: CHAT_IMAGE_CLEANUP_CRON } },
+    )
+    this.logger.log(`Chat image cleanup job scheduled: ${CHAT_IMAGE_CLEANUP_CRON}`)
   }
 }

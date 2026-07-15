@@ -6,6 +6,7 @@ import { TokenFlushProcessor } from './processors/token-flush.processor'
 import { FeedbackSummaryProcessor } from './processors/feedback-summary.processor'
 import { ModelFeedbackSummaryProcessor } from './processors/model-feedback-summary.processor'
 import { WaitlistReminderProcessor } from './processors/waitlist-reminder.processor'
+import { ChatImageCleanupProcessor } from './processors/chat-image-cleanup.processor'
 import { PrismaModule } from '../prisma/prisma.module'
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module'
 import { CampaignModule } from '../modules/campaign/campaign.module'
@@ -23,6 +24,7 @@ import { CampaignModule } from '../modules/campaign/campaign.module'
     BullModule.registerQueue({ name: 'feedback-summary' }),
     BullModule.registerQueue({ name: 'model-feedback-summary' }),
     BullModule.registerQueue({ name: 'waitlist-reminder' }),
+    BullModule.registerQueue({ name: 'chat-image-cleanup' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -33,6 +35,7 @@ import { CampaignModule } from '../modules/campaign/campaign.module'
     FeedbackSummaryProcessor,
     ModelFeedbackSummaryProcessor,
     WaitlistReminderProcessor,
+    ChatImageCleanupProcessor,
   ],
 })
 export class QueueModule {}

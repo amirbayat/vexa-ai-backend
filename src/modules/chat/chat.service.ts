@@ -416,7 +416,7 @@ export class ChatService {
                 const parsed = parseChatImageDataUrl(dataUrl)
                 if (!parsed) return null
                 try {
-                  return await this.storageService.uploadImage(parsed.buffer, parsed.ext)
+                  return await this.storageService.uploadImage(parsed.buffer, parsed.ext, conversationId)
                 } catch (err) {
                   this.logger.warn(`MinIO upload failed, image will not be persisted: ${(err as Error).message}`)
                   return null
@@ -710,7 +710,7 @@ export class ChatService {
 
       let imageKey: string | null = null
       try {
-        imageKey = await this.storageService.uploadImage(buffer, ext)
+        imageKey = await this.storageService.uploadImage(buffer, ext, conversationId)
       } catch (err) {
         this.logger.warn(`MinIO upload failed for generated image: ${(err as Error).message}`)
       }
