@@ -827,6 +827,21 @@ enum CampaignStatus {
   CLOSED
 }
 
+// «قطع نت» — بازه‌ای که ادمین دستی ثبت می‌کند تا اشتراک اکو/پلاسِ کاربران در آن بازه هدر نرود؛
+// روی endedAt هیچ رکورد دومی با endedAt=null نباید هم‌زمان وجود داشته باشد (چک در سرویس، نه اینجا)
+model NetworkOutage {
+  id               String    @id @default(uuid())
+  startedAt        DateTime  @default(now())
+  endedAt          DateTime? // null = هنوز جریان دارد
+  extendedDays     Float? // پس از پایان: چند روز به periodEnd اشتراک‌های فعال اضافه شد
+  affectedCount    Int? // چندتا اشتراک تحت تاثیر قرار گرفت
+  createdByAdminId String?
+  createdAt        DateTime  @default(now())
+
+  @@index([endedAt])
+  @@map("network_outages")
+}
+
 model WaitlistEntry {
   id                   String         @id @default(uuid())
   campaignId           String

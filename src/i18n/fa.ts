@@ -137,4 +137,8 @@ export const fa = {
     campaignNotFound: 'کمپینی یافت نشد',
     notWaiting: 'این کاربر در لیست انتظار نیست',
   },
+  networkOutage: {
+    alreadyOpen: 'یک قطعی از قبل ثبت شده و هنوز پایان نیافته است',
+    noneOpen: 'هیچ قطعی بازی برای پایان دادن وجود ندارد',
+  },
 } as const
