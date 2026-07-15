@@ -698,9 +698,19 @@ export class ChatService {
     const callStart = Date.now()
 
     try {
+      // size/quality دقیقاً باید همان چیزی باشد که قیمت‌گذاری این ردیف (imageGenPriceUsd) بر
+      // اساسش تعیین شده — مثلاً قیمت مدل‌های خانواده‌ی gpt-image جدولی است (quality×size)، نه ثابت؛
+      // اگر این پارامترها پاس داده نشوند، provider مقدار پیش‌فرض خودش را استفاده می‌کند که ممکن است
+      // با priceUsd همین ردیف هم‌خوان نباشد
       const result = await generateImage({
         model: this.provider.imageModel(modelId),
         prompt: dto.content,
+        ...(modelRecord.imageGenSize
+          ? { size: modelRecord.imageGenSize as `${number}x${number}` }
+          : {}),
+        ...(modelRecord.imageGenQuality
+          ? { providerOptions: { liara: { quality: modelRecord.imageGenQuality } } }
+          : {}),
       })
       this.liveStats.recordLiaraCall('chat', true, Date.now() - callStart).catch(() => {})
 

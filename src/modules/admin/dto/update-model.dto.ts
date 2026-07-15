@@ -47,6 +47,14 @@ export class UpdateModelDto {
   imageGenPriceUsd?: number
 
   @IsOptional()
+  @IsString()
+  imageGenQuality?: string
+
+  @IsOptional()
+  @IsString()
+  imageGenSize?: string
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean
 
