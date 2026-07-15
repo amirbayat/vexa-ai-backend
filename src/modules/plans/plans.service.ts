@@ -39,6 +39,7 @@ export class PlansService {
         provider: true,
         tier: true,
         supportsVision: true,
+        supportsImageGen: true,
         sortOrder: true,
       },
     })

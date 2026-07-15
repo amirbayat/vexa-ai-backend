@@ -33,6 +33,17 @@ export class CreateModelDto {
   @IsBoolean()
   supportsVision?: boolean
 
+  // docs/PRD-chat-images.md بخش ۵.۵
+  @IsOptional()
+  @IsBoolean()
+  supportsImageGen?: boolean
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  imageGenPriceUsd?: number
+
   @IsOptional()
   @IsBoolean()
   isActive?: boolean

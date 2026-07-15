@@ -93,6 +93,16 @@ export class PricingService {
     }
   }
 
+  // docs/PRD-chat-images.md بخش ۵.۵ — تولید عکس هزینه‌ی ثابت هر عکس دارد (AiModel.imageGenPriceUsd)،
+  // نه هزینه‌ی توکنی؛ همون تبدیل نرخ ارز calcCost را بدون محاسبه‌ی توکن دوباره استفاده می‌کند
+  async calcFlatCostToman(usdCost: number): Promise<{ costToman: number; costUsdMicros: number }> {
+    const rate = await this.exchangeRate.getUsdtToman()
+    return {
+      costToman: Math.ceil(usdCost * rate),
+      costUsdMicros: Math.round(usdCost * 1_000_000),
+    }
+  }
+
   async dailyBudgetToman(priceMonthly: number): Promise<number> {
     if (priceMonthly === 0) return Math.floor(this.freeBudgetToman / 30)
     return Math.floor((priceMonthly * this.aiShare) / 30)

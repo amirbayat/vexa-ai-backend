@@ -41,6 +41,8 @@ export const fa = {
     dailyBlocked: 'به محدودیت پیام روزانه رسیدید. برای ارسال پیام بیشتر پلن خود را ارتقا دهید.',
     throttledNotice: 'پیام‌های باقی‌مانده امروز با محدودیت توکن ارسال می‌شوند',
     rollingWindowBlocked: (hours: number) => `تعداد پیام‌های شما در ${hours} ساعت اخیر به سقف مجاز رسیده.`,
+    imageGenNotSupported: 'مدل انتخابی از تولید عکس پشتیبانی نمی‌کند. لطفاً یک مدل تولید عکس انتخاب کنید.',
+    imageGenFailed: 'تولید عکس ناموفق بود. دوباره تلاش کنید',
   },
   payment: {
     pending: 'در انتظار پرداخت',
@@ -155,5 +157,6 @@ export const fa = {
     invalidFormat: 'فرمت عکس نامعتبر است — فقط PNG/JPEG/WEBP/GIF مجاز است',
     tooLarge: (maxMb: number) => `حجم هر عکس نباید بیشتر از ${maxMb.toLocaleString('fa-IR')} مگابایت باشد`,
     contentMismatch: 'محتوای عکس با فرمت اعلام‌شده مطابقت ندارد',
+    formatNotAllowed: (allowed: string) => `فرمت این عکس مجاز نیست — فقط ${allowed} پذیرفته می‌شود`,
   },
 } as const

@@ -26,9 +26,31 @@ function matchesMagicBytes(buffer: Buffer, ext: string): boolean {
   }
 }
 
+export interface ParsedChatImage {
+  ext: string
+  buffer: Buffer
+}
+
+// docs/PRD-chat-images.md بخش ۵.۴ — هم اعتبارسنجی هم آپلود MinIO از همین یک parse مشترک
+// استفاده می‌کنند تا decode/regex دوبار (با ریسک واگرایی) تکرار نشود
+export function parseChatImageDataUrl(dataUrl: string): ParsedChatImage | null {
+  const match = DATA_URL_RE.exec(dataUrl)
+  if (!match) return null
+  try {
+    return { ext: match[1].toLowerCase(), buffer: Buffer.from(match[2], 'base64') }
+  } catch {
+    return null
+  }
+}
+
+// 'jpg' و 'jpeg' یک فرمت‌اند — تنظیمات ادمین همیشه شکل canonical ('jpeg') را نگه می‌دارد
+function normalizeExt(ext: string): string {
+  return ext === 'jpg' ? 'jpeg' : ext
+}
+
 export function validateChatImages(
   images: string[] | undefined,
-  opts: { maxCount: number; maxSizeMb: number },
+  opts: { maxCount: number; maxSizeMb: number; allowedFormats: string[] },
 ): void {
   if (!images || images.length === 0) return
 
@@ -37,18 +59,15 @@ export function validateChatImages(
   }
 
   const maxBytes = opts.maxSizeMb * 1024 * 1024
+  const allowed = opts.allowedFormats.map(normalizeExt)
   for (const image of images) {
-    const match = DATA_URL_RE.exec(image)
-    if (!match) throw new BadRequestException(fa.chatImages.invalidFormat)
+    const parsed = parseChatImageDataUrl(image)
+    if (!parsed) throw new BadRequestException(fa.chatImages.invalidFormat)
 
-    const ext = match[1].toLowerCase()
-    let buffer: Buffer
-    try {
-      buffer = Buffer.from(match[2], 'base64')
-    } catch {
-      throw new BadRequestException(fa.chatImages.invalidFormat)
+    const { ext, buffer } = parsed
+    if (!allowed.includes(normalizeExt(ext))) {
+      throw new BadRequestException(fa.chatImages.formatNotAllowed(allowed.join('، ')))
     }
-
     if (buffer.length === 0 || buffer.length > maxBytes) {
       throw new BadRequestException(fa.chatImages.tooLarge(opts.maxSizeMb))
     }

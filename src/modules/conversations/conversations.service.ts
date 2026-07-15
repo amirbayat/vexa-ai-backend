@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
+import { StorageService } from '../../storage/storage.service'
 import { fa } from '../../i18n/fa'
 import { CreateConversationDto } from './dto/create-conversation.dto'
 import { UpdateConversationDto } from './dto/update-conversation.dto'
@@ -11,7 +12,10 @@ import { ListConversationsDto } from './dto/list-conversations.dto'
 
 @Injectable()
 export class ConversationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   create(userId: string, dto: CreateConversationDto) {
     return this.prisma.conversation.create({
@@ -76,7 +80,21 @@ export class ConversationsService {
     if (conversation.userId !== userId)
       throw new ForbiddenException(fa.conversations.forbidden)
 
-    return conversation
+    // docs/PRD-chat-images.md بخش ۵.۴ — کلیدهای MinIO در لحظه‌ی خواندن به presigned URL کوتاه‌مدت
+    // تبدیل می‌شوند (هرگز در DB ذخیره نمی‌شوند)؛ رکوردهای قدیمی که هنوز base64 خام‌اند دست‌نخورده می‌مانند
+    const messages = await Promise.all(
+      conversation.messages.map(async (m) => {
+        if (!m.images) return m
+        const images = await Promise.all(
+          (m.images as string[]).map((img) =>
+            this.storage.isStorageKey(img) ? this.storage.presignedGetUrl(img) : img,
+          ),
+        )
+        return { ...m, images }
+      }),
+    )
+
+    return { ...conversation, messages }
   }
 
   async update(id: string, userId: string, dto: UpdateConversationDto) {

@@ -9,11 +9,11 @@ import {
 import { ConfigService } from '@nestjs/config'
 import * as crypto from 'crypto'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText, APICallError, RetryError } from 'ai'
+import { streamText, generateImage, APICallError, RetryError } from 'ai'
 import type { ModelMessage, UserModelMessage } from 'ai'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
-import { TokenService, rollingWindowKey } from '../usage/token.service'
+import { TokenService, rollingWindowKey, type PlanLimits } from '../usage/token.service'
 import { PricingService } from '../usage/pricing.service'
 import { TokenEstimatorService } from '../usage/token-estimator.service'
 import { ModelRouterService } from '../model-router/model-router.service'
@@ -22,10 +22,12 @@ import { TopicService } from '../usage-analytics/topic.service'
 import { CampaignService } from '../campaign/campaign.service'
 import { ChatConfigService } from '../chat-config/chat-config.service'
 import { LiveStatsService } from '../live-stats/live-stats.service'
+import { StorageService } from '../../storage/storage.service'
 import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
-import { validateChatImages } from '../../common/validators/chat-image.validator'
+import { validateChatImages, parseChatImageDataUrl } from '../../common/validators/chat-image.validator'
+import { detectImageGenIntent } from './image-gen-intent'
 
 const OPTIMAL_MODE = 'optimal'
 
@@ -69,6 +71,7 @@ export class ChatService {
     private readonly campaignService: CampaignService,
     private readonly chatConfigService: ChatConfigService,
     private readonly liveStats: LiveStatsService,
+    private readonly storageService: StorageService,
     private readonly config: ConfigService,
   ) {
     this.provider = createOpenAICompatible({
@@ -255,6 +258,21 @@ export class ChatService {
     if (allowed.length === 0)
       throw new ForbiddenException(fa.chat.modelNotAllowed)
 
+    // اینجا زودتر از قبل گرفته می‌شود (قبلاً پایین‌تر، کنار اعتبارسنجی عکس بود) چون
+    // implicitImageGenEnabled همین‌جا لازم است — کش ۶۰ ثانیه‌ای درون‌حافظه‌ای، هزینه‌ی اضافه ندارد
+    const chatConfig = await this.chatConfigService.getConfig()
+
+    // docs/PRD-chat-images.md بخش ۵.۵ — تولید عکس مسیر کاملاً جدایی است: نه Router (طبقه‌بندی
+    // SIMPLE/MEDIUM/COMPLEX بی‌معنی است)، نه vision-preflight، نه سهمیه‌ی توکنی خروجی. مدل یا
+    // صراحتاً انتخاب شده (toggle فرانت) یا از روی نیت پیام تشخیص داده می‌شود (heuristic، قابل
+    // خاموش‌کردن از ادمین) — هر دو حالت به همان مسیر می‌روند. تشخیص ضمنی عمداً وقتی کاربر
+    // خودش عکس آپلود کرده اجرا نمی‌شود — آن یک درخواست vision است (توضیح/تحلیل عکس)، نه تولید.
+    const implicitImageGenTriggered =
+      !dto.images?.length && chatConfig.implicitImageGenEnabled && detectImageGenIntent(dto.content)
+    if (dto.generateImage || implicitImageGenTriggered) {
+      return this.handleImageGeneration(res, conversationId, userId, dto, plan)
+    }
+
     // ── model selection via Router — همیشه اجرا می‌شود، حتی روی انتخاب دستی ──
     // اگر کاربر «حالت بهینه» را انتخاب کرده باشد manualModel تعریف نمی‌شود و Router هر سه سطح را خودش تعیین می‌کند.
     // اگر کاربر مدل مشخصی انتخاب کرده باشد، برای پیام‌های SIMPLE باز هم بی‌صدا override می‌شود (بخش ۲/۸ PRD-model-router.md).
@@ -291,11 +309,12 @@ export class ChatService {
     // ── تصاویر: اعتبارسنجی امنیتی + چک vision (preflight) ──────────────────
     // docs/PRD-chat-images.md بخش ۵.۱ — قبل از این، هیچ چک فرمت/حجم/magic-bytes ای
     // روی dto.images نبود؛ سقف‌ها هم از تنظیمات ادمین (ChatConfig) خوانده می‌شوند، نه ثابت در کد.
-    const chatConfig = await this.chatConfigService.getConfig()
+    // (chatConfig بالاتر گرفته شده)
     if (dto.images?.length) {
       validateChatImages(dto.images, {
         maxCount: chatConfig.maxImagesPerMessage,
         maxSizeMb: chatConfig.maxImageSizeMb,
+        allowedFormats: chatConfig.allowedImageFormats as string[],
       })
 
       // نکته: وقتی rawModelChoice === 'optimal' باشد، aiModel با این نام پیدا نمی‌شود (modelRecord=null)
@@ -386,6 +405,27 @@ export class ChatService {
 
     try {
       const topicId = await this.topicService.classify(dto.content)
+
+      // docs/PRD-chat-images.md بخش ۵.۴ — برای مدل همچنان base64 خام (dto.images) استفاده
+      // می‌شود (پایین‌تر)؛ اینجا فقط برای ماندگاری در DB به MinIO آپلود می‌شود. اگر یک عکس
+      // آپلودش شکست بخورد، فقط همان یکی نادیده گرفته می‌شود — کل پیام fail نمی‌شود.
+      const persistedImageKeys = dto.images?.length
+        ? (
+            await Promise.all(
+              dto.images.map(async (dataUrl) => {
+                const parsed = parseChatImageDataUrl(dataUrl)
+                if (!parsed) return null
+                try {
+                  return await this.storageService.uploadImage(parsed.buffer, parsed.ext)
+                } catch (err) {
+                  this.logger.warn(`MinIO upload failed, image will not be persisted: ${(err as Error).message}`)
+                  return null
+                }
+              }),
+            )
+          ).filter((key): key is string => key !== null)
+        : []
+
       await this.prisma.message.create({
         data: {
           conversationId,
@@ -393,7 +433,7 @@ export class ChatService {
           role: 'USER',
           content: dto.content,
           ...(topicId ? { topicId } : {}),
-          ...(dto.images?.length ? { images: dto.images } : {}),
+          ...(persistedImageKeys.length ? { images: persistedImageKeys } : {}),
         },
       })
 
@@ -596,6 +636,128 @@ export class ChatService {
         `data: ${JSON.stringify({ error: message, code: isModelError ? 'model_unavailable' : 'stream_error' })}\n\n`,
       )
       this.liveStats.recordLiaraCall('chat', false, Date.now() - chatCallStart).catch(() => {})
+    } finally {
+      res.end()
+      this.liveStats.trackStreamEnd(streamToken).catch(() => {})
+    }
+  }
+
+  // docs/PRD-chat-images.md بخش ۵.۵ — مسیر تولید عکس: مستقل از streamText/Router. نتیجه یک‌جا
+  // (نه تدریجی) از طریق یک رویداد SSE برگردانده می‌شود، نه چانک‌به‌چانک مثل متن.
+  private async handleImageGeneration(
+    res: Response,
+    conversationId: string,
+    userId: string,
+    dto: StreamMessageDto,
+    plan: PlanLimits,
+  ): Promise<void> {
+    // انتخاب دستی (toggle صریح) اگر معتبر و supportsImageGen باشد در اولویت است؛ وگرنه (مخصوصاً
+    // حالت تشخیص ضمنی که کاربر اصلاً مدلی برای تولید عکس انتخاب نکرده) اولین مدل فعال
+    // supportsImageGen داخل allowedModels پلن به‌صورت پیش‌فرض انتخاب می‌شود
+    const requestedModel = dto.model && dto.model !== OPTIMAL_MODE ? resolveModelId(dto.model) : undefined
+    let modelRecord =
+      requestedModel && plan.allowedModels.includes(requestedModel)
+        ? await this.prisma.aiModel.findFirst({
+            where: { name: requestedModel, isActive: true, supportsImageGen: true },
+          })
+        : null
+
+    if (!modelRecord) {
+      modelRecord = await this.prisma.aiModel.findFirst({
+        where: { name: { in: plan.allowedModels }, supportsImageGen: true, isActive: true },
+        orderBy: { sortOrder: 'asc' },
+      })
+    }
+    if (!modelRecord) {
+      throw new BadRequestException(fa.chat.imageGenNotSupported)
+    }
+    const modelId = modelRecord.name
+
+    const priceUsd = modelRecord.imageGenPriceUsd ?? 0
+
+    // پیش‌چک PAYG — همون الگوی چت معمولی (بخش ۵.۲)؛ برای پلن‌های دیگر بودجه‌ی بالاتر preflight شده
+    if (plan.isPayAsYouGo) {
+      const markup = plan.payAsYouGoMarkup ?? 1.3
+      const { costToman: worstCaseToman } = await this.pricingService.calcFlatCostToman(priceUsd)
+      const balance = await this.pricingService.getWalletBalance(userId)
+      if (balance < Math.ceil(worstCaseToman * markup)) {
+        throw new HttpException(
+          { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
+          402,
+        )
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.setHeader('X-Accel-Buffering', 'no')
+    res.flushHeaders()
+
+    const streamToken = await this.liveStats.trackStreamStart()
+    const callStart = Date.now()
+
+    try {
+      const result = await generateImage({
+        model: this.provider.imageModel(modelId),
+        prompt: dto.content,
+      })
+      this.liveStats.recordLiaraCall('chat', true, Date.now() - callStart).catch(() => {})
+
+      const { costToman, costUsdMicros } = await this.pricingService.calcFlatCostToman(priceUsd)
+      const ext = result.image.mediaType.split('/')[1] ?? 'png'
+      const buffer = Buffer.from(result.image.base64, 'base64')
+
+      let imageKey: string | null = null
+      try {
+        imageKey = await this.storageService.uploadImage(buffer, ext)
+      } catch (err) {
+        this.logger.warn(`MinIO upload failed for generated image: ${(err as Error).message}`)
+      }
+
+      const assistantMessage = await this.prisma.message.create({
+        data: {
+          conversationId,
+          userId,
+          role: 'ASSISTANT',
+          content: '',
+          ...(imageKey ? { images: [imageKey] } : {}),
+          costToman,
+          costUsdMicros,
+          model: modelId,
+        },
+      })
+
+      await Promise.all([
+        this.pricingService.trackCost(userId, costToman, costUsdMicros),
+        this.prisma.conversation.update({
+          where: { id: conversationId },
+          data: { lastMessageAt: new Date() },
+        }),
+      ])
+
+      if (plan.isPayAsYouGo) {
+        this.pricingService
+          .debitWallet(userId, costToman, plan.payAsYouGoMarkup ?? 1.3, fa.payAsYouGo.messageDebitDescription, {
+            messageId: assistantMessage.id,
+            conversationId,
+            kind: 'image-generation',
+          })
+          .then((ok) => {
+            if (!ok) this.logger.error(`debitWallet: insufficient balance for user=${userId} message=${assistantMessage.id}`)
+          })
+          .catch((err) => this.logger.error(`debitWallet failed (image-gen) for user=${userId}`, err))
+      }
+
+      const dataUrl = `data:${result.image.mediaType};base64,${result.image.base64}`
+      res.write(
+        `data: ${JSON.stringify({ info: 'image-generated', image: dataUrl, messageId: assistantMessage.id })}\n\n`,
+      )
+      res.write('data: [DONE]\n\n')
+    } catch (err) {
+      this.liveStats.recordLiaraCall('chat', false, Date.now() - callStart).catch(() => {})
+      this.logger.error(`image generation failed: ${(err as Error).message}`)
+      res.write(`data: ${JSON.stringify({ error: fa.chat.imageGenFailed })}\n\n`)
     } finally {
       res.end()
       this.liveStats.trackStreamEnd(streamToken).catch(() => {})

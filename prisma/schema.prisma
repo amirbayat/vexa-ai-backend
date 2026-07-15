@@ -462,6 +462,7 @@ model AiModel {
   outputPricePerM Float       @default(0)
   supportsVision  Boolean     @default(false)
   supportsImageGen Boolean    @default(false) // docs/PRD-chat-images.md — تولید عکس
+  imageGenPriceUsd Float? // دلار — هزینه‌ی ثابت هر عکس تولیدشده با این مدل (فقط وقتی supportsImageGen)
   isActive        Boolean     @default(true)
   sortOrder       Int         @default(0)
   tier            ModelTier   @default(MEDIUM)
@@ -600,6 +601,8 @@ model ChatConfig {
   summaryMaxTokens     Int      @default(200)  // حداکثر طول خروجی خلاصه — کوتاه نگه داشته می‌شود
   maxImagesPerMessage  Int      @default(4)    // docs/PRD-chat-images.md بخش ۵.۶
   maxImageSizeMb       Int      @default(8)    // سقف سایز هر عکس بعد از decode
+  allowedImageFormats  Json     @default("[\"png\",\"jpeg\",\"webp\",\"gif\"]") // string[] — فقط از این چهارتا که magic-byte برایشان چک می‌شود
+  implicitImageGenEnabled Boolean @default(true) // تشخیص خودکار نیت تولید عکس وسط چت معمولی (بدون toggle صریح) — heuristic، نه قطعی
   updatedAt            DateTime @updatedAt
 
   @@map("chat_config")

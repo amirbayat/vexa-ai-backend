@@ -1,4 +1,6 @@
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator'
+import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator'
+
+export const CHAT_IMAGE_FORMATS = ['png', 'jpeg', 'webp', 'gif'] as const
 
 export class UpdateChatConfigDto {
   @IsOptional()
@@ -28,4 +30,14 @@ export class UpdateChatConfigDto {
   @Min(1)
   @Max(20)
   maxImageSizeMb?: number
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(CHAT_IMAGE_FORMATS, { each: true })
+  allowedImageFormats?: string[]
+
+  // docs/PRD-chat-images.md — تشخیص خودکار نیت تولید عکس وسط چت معمولی، بدون toggle صریح کاربر
+  @IsOptional()
+  @IsBoolean()
+  implicitImageGenEnabled?: boolean
 }

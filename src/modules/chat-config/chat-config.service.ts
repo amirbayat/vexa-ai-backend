@@ -1,15 +1,20 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { ChatConfig } from '@prisma/client'
+import { Prisma, type ChatConfig } from '@prisma/client'
 
 const CACHE_TTL_MS = 60_000
 
 export type UpdatableChatConfig = Partial<
   Pick<
     ChatConfig,
-    'globalContextMd' | 'summaryTriggerTokens' | 'summaryMaxTokens' | 'maxImagesPerMessage' | 'maxImageSizeMb'
+    | 'globalContextMd'
+    | 'summaryTriggerTokens'
+    | 'summaryMaxTokens'
+    | 'maxImagesPerMessage'
+    | 'maxImageSizeMb'
+    | 'implicitImageGenEnabled'
   >
->
+> & { allowedImageFormats?: string[] }
 
 /**
  * تک نقطه‌ی دسترسی به ChatConfig (singleton) — هم برای مسیر چت اصلی (روی هر پیام صدا زده
@@ -41,7 +46,13 @@ export class ChatConfigService {
   async updateConfig(data: UpdatableChatConfig): Promise<ChatConfig> {
     // dto class fields با مقدار undefined هم به‌صورت key صریح روی instance ست می‌شوند،
     // پس قبل از spread حذف می‌شوند وگرنه مقادیر پیش‌فرض create را با undefined بازنویسی می‌کنند
-    const definedData = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined))
+    const { allowedImageFormats, ...rest } = data
+    const definedData: Record<string, unknown> = Object.fromEntries(
+      Object.entries(rest).filter(([, v]) => v !== undefined),
+    )
+    if (allowedImageFormats !== undefined) {
+      definedData.allowedImageFormats = allowedImageFormats as Prisma.InputJsonValue
+    }
 
     const config = await this.prisma.chatConfig.upsert({
       where: { id: 'singleton' },
