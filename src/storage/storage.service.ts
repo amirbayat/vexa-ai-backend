@@ -3,10 +3,6 @@ import { ConfigService } from '@nestjs/config'
 import { Client } from 'minio'
 import * as crypto from 'crypto'
 
-// docs/PRD-chat-images.md بخش ۳.۲ — کافی برای این‌که کاربر تاریخچه‌ی مکالمه را باز کند و
-// عکس‌ها بارگذاری شوند؛ کوتاه نگه داشته می‌شود چون presigned URL که یک‌بار صادر شد قابل ابطال نیست
-const PRESIGN_EXPIRY_SECONDS = 10 * 60
-
 @Injectable()
 export class StorageService implements OnModuleInit {
   private readonly logger = new Logger(StorageService.name)
@@ -38,8 +34,9 @@ export class StorageService implements OnModuleInit {
     }
   }
 
-  // کلید تصادفی UUID — غیرقابل‌حدس، چون MinIO خصوصی نیست تضمین امنیتی محسوب نمی‌شود ولی
-  // presigned URL (نه public bucket) واقعی جلوگیری از دسترسی غیرمجاز است (بخش ۳.۲ PRD).
+  // کلید تصادفی UUID — غیرقابل‌حدس، ولی چیزی که واقعاً جلوی دسترسی غیرمجاز را می‌گیرد این
+  // است که این کلید هرگز مستقیم به فرانت داده نمی‌شود؛ همیشه پشت JwtGuard + چک مالکیت
+  // (conversations.service.ts getImage/findOne) سرو می‌شود، نه با یک presigned URL عمومی.
   // conversationId به‌عنوان پیشوند (پوشه‌ی مجازی در S3) اضافه می‌شود تا عکس‌های یک مکالمه
   // کنار هم باشند — هم برای مرور دستی توی کنسول، هم برای حذف دسته‌ای بعداً (مثلاً وقتی مکالمه پاک می‌شود)
   async uploadImage(buffer: Buffer, ext: string, conversationId?: string): Promise<string> {
@@ -48,16 +45,12 @@ export class StorageService implements OnModuleInit {
     return key
   }
 
-  async presignedGetUrl(key: string): Promise<string> {
-    return this.client.presignedGetObject(this.bucket, key, PRESIGN_EXPIRY_SECONDS)
-  }
-
   async deleteObject(key: string): Promise<void> {
     await this.client.removeObject(this.bucket, key)
   }
 
-  // برای ویرایش/ترکیب چند‌مرحله‌ای عکس (images/edits) — برخلاف presignedGetUrl که فقط یک
-  // لینک می‌دهد، اینجا واقعاً بایت‌های تصویر لازم است تا مستقیم به provider فرستاده شود
+  // هم برای ویرایش/ترکیب چند‌مرحله‌ای عکس (images/edits، بایت خام برای provider) و هم برای
+  // سرو کردن عکس به فرانت از پشت GET /conversations/:id/images/:filename استفاده می‌شود
   async downloadImage(key: string): Promise<Buffer> {
     const stream = await this.client.getObject(this.bucket, key)
     const chunks: Buffer[] = []
@@ -68,7 +61,7 @@ export class StorageService implements OnModuleInit {
   }
 
   // رشته‌های قدیمی هنوز base64 خام هستند (data:image/...)؛ کلیدهای MinIO این‌طور نیستند —
-  // docs/PRD-chat-images.md بخش ۴، برای تشخیص کدام رکورد presign لازم دارد
+  // docs/PRD-chat-images.md بخش ۴، برای تشخیص کدام رکورد باید از پشت بک‌اند سرو شود
   isStorageKey(value: string): boolean {
     return !value.startsWith('data:')
   }

@@ -31,6 +31,20 @@ export interface ParsedChatImage {
   buffer: Buffer
 }
 
+const EXT_MIME_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+}
+
+// همون فرمت‌های مجاز بالا (DATA_URL_RE) — برای ست کردن Content-Type درست وقتی عکس از
+// MinIO سرو می‌شود (conversations.controller.ts، /:id/images/:filename)
+export function mimeTypeForExt(ext: string): string {
+  return EXT_MIME_TYPES[ext.toLowerCase()] ?? 'application/octet-stream'
+}
+
 // docs/PRD-chat-images.md بخش ۵.۴ — هم اعتبارسنجی هم آپلود MinIO از همین یک parse مشترک
 // استفاده می‌کنند تا decode/regex دوبار (با ریسک واگرایی) تکرار نشود
 export function parseChatImageDataUrl(dataUrl: string): ParsedChatImage | null {

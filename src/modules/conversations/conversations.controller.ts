@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common'
+import type { Response } from 'express'
 import { JwtGuard } from '../../common/guards/jwt.guard'
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator'
 import { ConversationsService } from './conversations.service'
@@ -25,6 +26,21 @@ export class ConversationsController {
   @Get(':id')
   findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.conversationsService.findOne(id, user.sub)
+  }
+
+  // فرانت این مسیر را با axios (هدر Authorization واقعی) و responseType:'blob' صدا می‌زند —
+  // نه با <img src="...">‌ خام، چون تگ img نمی‌تواند هدر بفرستد؛ همین یعنی برخلاف presigned
+  // URL قبلی، این لینک بدون توکن واقعی کاربر برای کس دیگری قابل استفاده نیست
+  @Get(':id/images/:filename')
+  async getImage(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('filename') filename: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, mimeType } = await this.conversationsService.getImage(id, filename, user.sub)
+    res.setHeader('Content-Type', mimeType)
+    res.send(buffer)
   }
 
   @Patch(':id')

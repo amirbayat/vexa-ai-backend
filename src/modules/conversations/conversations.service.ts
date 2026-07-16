@@ -9,6 +9,7 @@ import { fa } from '../../i18n/fa'
 import { CreateConversationDto } from './dto/create-conversation.dto'
 import { UpdateConversationDto } from './dto/update-conversation.dto'
 import { ListConversationsDto } from './dto/list-conversations.dto'
+import { mimeTypeForExt } from '../../common/validators/chat-image.validator'
 
 @Injectable()
 export class ConversationsService {
@@ -80,21 +81,33 @@ export class ConversationsService {
     if (conversation.userId !== userId)
       throw new ForbiddenException(fa.conversations.forbidden)
 
-    // docs/PRD-chat-images.md بخش ۵.۴ — کلیدهای MinIO در لحظه‌ی خواندن به presigned URL کوتاه‌مدت
-    // تبدیل می‌شوند (هرگز در DB ذخیره نمی‌شوند)؛ رکوردهای قدیمی که هنوز base64 خام‌اند دست‌نخورده می‌مانند
-    const messages = await Promise.all(
-      conversation.messages.map(async (m) => {
-        if (!m.images) return m
-        const images = await Promise.all(
-          (m.images as string[]).map((img) =>
-            this.storage.isStorageKey(img) ? this.storage.presignedGetUrl(img) : img,
-          ),
-        )
-        return { ...m, images }
-      }),
-    )
+    // کلیدهای MinIO دیگر به presigned URL تبدیل نمی‌شوند (آن لینک بدون هیچ auth ای، تا وقتی
+    // منقضی شود، برای هرکسی که به آن دسترسی پیدا کند کار می‌کرد) — به‌جایش یک مسیر نسبی از
+    // بک‌اند خودمان برمی‌گردد که پشت همین JwtGuard + چک مالکیت بالا سرو می‌شود
+    // (conversations.controller.ts، GET /:id/images/:filename)؛ فرانت با header واقعی Authorization
+    // آن را می‌گیرد و به blob URL تبدیل می‌کند. رکوردهای قدیمی که هنوز base64 خام‌اند دست‌نخورده می‌مانند.
+    const messages = conversation.messages.map((m) => {
+      if (!m.images) return m
+      const images = (m.images as string[]).map((img) =>
+        this.storage.isStorageKey(img) ? `/conversations/${id}/images/${img.split('/').pop()}` : img,
+      )
+      return { ...m, images }
+    })
 
     return { ...conversation, messages }
+  }
+
+  async getImage(conversationId: string, filename: string, userId: string): Promise<{ buffer: Buffer; mimeType: string }> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { userId: true },
+    })
+    if (!conversation) throw new NotFoundException(fa.conversations.notFound)
+    if (conversation.userId !== userId) throw new ForbiddenException(fa.conversations.forbidden)
+
+    const ext = filename.split('.').pop() ?? ''
+    const buffer = await this.storage.downloadImage(`${conversationId}/${filename}`)
+    return { buffer, mimeType: mimeTypeForExt(ext) }
   }
 
   async update(id: string, userId: string, dto: UpdateConversationDto) {
