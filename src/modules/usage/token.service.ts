@@ -1,5 +1,6 @@
 import { HttpException, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import * as crypto from 'crypto'
 import { RedisService } from '../../redis/redis.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { fa } from '../../i18n/fa'
@@ -44,6 +45,11 @@ export interface PlanLimits {
   // docs/PRD-pay-as-you-go-wallet.md — بدون بودجه‌ی درصدی/fallback پله‌ای؛ مصرف واقعی از کیف‌پول کم می‌شود
   isPayAsYouGo: boolean
   payAsYouGoMarkup: number | null
+  // تنظیمات تولید/ویرایش عکس مخصوص این پلن
+  defaultImageGenModel: string | null
+  maxImageGenPerDay: number | null
+  maxImageGenPerWindow: number | null
+  imageGenWindowHours: number | null
 }
 
 // Iran Standard Time = UTC+3:30 (no DST)
@@ -79,6 +85,16 @@ function planCacheKey(userId: string) {
 
 export function rollingWindowKey(userId: string) {
   return `ratelimit:msg:${userId}`
+}
+
+// مستقل از rollingWindowKey (پیام‌های معمولی) — چون هر عکس چند برابر گران‌تر از یک پیام
+// متنی است، سقف جدا برای تولید/ویرایش عکس لازم است، نه سهم مشترک با سقف پیام معمولی
+function imageGenDailyKey(userId: string) {
+  return `ratelimit:imagegen:daily:${userId}:${iranDate()}`
+}
+
+export function imageGenWindowKey(userId: string) {
+  return `ratelimit:imagegen:window:${userId}`
 }
 
 // نیمه‌شب بعدیِ به‌وقت ایران، به ISO/UTC برای پاسخ به کلاینت
@@ -235,6 +251,50 @@ export class TokenService {
     return { blocked: true, resetAt }
   }
 
+  // سقف مستقل تعداد درخواست تولید/ویرایش عکس — هم سقف روزانه (شمارنده‌ی ساده، نیمه‌شب ایران
+  // ریست می‌شود) هم سقف پنجره‌ی لغزان (همون الگوی ZSET بالا، فقط کلید/سقف جدا)؛ هرکدام که
+  // null باشد یعنی غیرفعال است برای این پلن
+  async getImageGenRateLimitStatus(
+    userId: string,
+    plan: Pick<PlanLimits, 'maxImageGenPerDay' | 'maxImageGenPerWindow' | 'imageGenWindowHours'>,
+  ): Promise<{ blocked: boolean; resetAt: string | null }> {
+    if (plan.maxImageGenPerDay !== null) {
+      const dailyCount = Number((await this.redis.get(imageGenDailyKey(userId))) ?? 0)
+      if (dailyCount >= plan.maxImageGenPerDay) {
+        const midnight = new Date(Date.now() + IRAN_OFFSET_MS)
+        midnight.setUTCHours(0, 0, 0, 0)
+        midnight.setUTCDate(midnight.getUTCDate() + 1)
+        return { blocked: true, resetAt: new Date(midnight.getTime() - IRAN_OFFSET_MS).toISOString() }
+      }
+    }
+
+    if (plan.maxImageGenPerWindow !== null) {
+      const windowHours = plan.imageGenWindowHours ?? 24
+      const key = imageGenWindowKey(userId)
+      const windowMs = windowHours * 3_600_000
+      await this.redis.zremrangebyscore(key, 0, Date.now() - windowMs)
+      const countInWindow = await this.redis.zcard(key)
+      if (countInWindow >= plan.maxImageGenPerWindow) {
+        const oldest = await this.redis.zrange(key, 0, 0, 'WITHSCORES')
+        const resetAt = oldest.length >= 2 ? new Date(Number(oldest[1]) + windowMs).toISOString() : null
+        return { blocked: true, resetAt }
+      }
+    }
+
+    return { blocked: false, resetAt: null }
+  }
+
+  // بعد از یک تولید/ویرایش عکس *موفق* صدا زده می‌شود — شمارنده‌ی روزانه را +۱ می‌کند (با
+  // TTL تا نیمه‌شب بعدی) و یک عضو تازه به ZSET پنجره‌ی لغزان اضافه می‌کند
+  async recordImageGenRequest(userId: string): Promise<void> {
+    const dKey = imageGenDailyKey(userId)
+    await Promise.all([
+      this.redis.incr(dKey),
+      this.redis.expire(dKey, 90_000, 'NX'),
+      this.redis.zadd(imageGenWindowKey(userId), Date.now(), `${Date.now()}:${crypto.randomUUID()}`),
+    ])
+  }
+
   // resolve maxOutputTokens based on today's message count and plan throttle steps
   // env overrides DB; steps must be sorted ascending by afterMessages
   resolveOutputThrottle(steps: ThrottleStep[], todayCount: number): number {
@@ -339,6 +399,10 @@ export class TokenService {
         trialRollingWindowHours: sub.plan.trialRollingWindowHours ?? null,
         isPayAsYouGo: sub.plan.isPayAsYouGo,
         payAsYouGoMarkup: sub.plan.payAsYouGoMarkup ?? null,
+        defaultImageGenModel: sub.plan.defaultImageGenModel ?? null,
+        maxImageGenPerDay: sub.plan.maxImageGenPerDay ?? null,
+        maxImageGenPerWindow: sub.plan.maxImageGenPerWindow ?? null,
+        imageGenWindowHours: sub.plan.imageGenWindowHours ?? null,
       }
     } else {
       // no subscription → look up the active free plan from DB instead of hardcoded defaults
@@ -372,6 +436,10 @@ export class TokenService {
         trialRollingWindowHours: freePlan?.trialRollingWindowHours ?? null,
         isPayAsYouGo: false,
         payAsYouGoMarkup: null,
+        defaultImageGenModel: freePlan?.defaultImageGenModel ?? null,
+        maxImageGenPerDay: freePlan?.maxImageGenPerDay ?? null,
+        maxImageGenPerWindow: freePlan?.maxImageGenPerWindow ?? null,
+        imageGenWindowHours: freePlan?.imageGenWindowHours ?? null,
       }
     }
 

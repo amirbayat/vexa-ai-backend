@@ -102,6 +102,10 @@ export class PlansService {
         ...(dto.payAsYouGoTopupPresets !== undefined && {
           payAsYouGoTopupPresets: dto.payAsYouGoTopupPresets as Prisma.InputJsonValue,
         }),
+        ...(dto.defaultImageGenModel !== undefined && { defaultImageGenModel: dto.defaultImageGenModel }),
+        ...(dto.maxImageGenPerDay !== undefined && { maxImageGenPerDay: dto.maxImageGenPerDay }),
+        ...(dto.maxImageGenPerWindow !== undefined && { maxImageGenPerWindow: dto.maxImageGenPerWindow }),
+        ...(dto.imageGenWindowHours !== undefined && { imageGenWindowHours: dto.imageGenWindowHours }),
       },
     })
   }

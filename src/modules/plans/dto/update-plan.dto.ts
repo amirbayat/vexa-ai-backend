@@ -151,4 +151,24 @@ export class UpdatePlanDto {
   @IsArray({ message: fa.validation.mustBeArray })
   @IsInt({ each: true, message: fa.validation.mustBeNumber })
   payAsYouGoTopupPresets?: number[]
+
+  // تنظیمات تولید/ویرایش عکس مخصوص این پلن
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  defaultImageGenModel?: string | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  maxImageGenPerDay?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  maxImageGenPerWindow?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  imageGenWindowHours?: number | null
 }

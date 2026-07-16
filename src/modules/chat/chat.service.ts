@@ -819,21 +819,6 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     )
   }
 
-  private async firstAffordable(
-    rankedCandidates: AiModel[],
-    balanceToman: number,
-    markup: number,
-    hasInputImages: boolean,
-  ): Promise<AiModel | null> {
-    for (const candidate of rankedCandidates) {
-      const { costToman } = await this.pricingService.calcFlatCostToman(
-        this.estimateWorstCaseImageUsd(candidate, hasInputImages),
-      )
-      if (balanceToman >= Math.ceil(costToman * markup)) return candidate
-    }
-    return null
-  }
-
   private async callImagesApi(
     path: '/images/generations' | '/images/edits',
     body: Record<string, unknown> | FormData,
@@ -1059,6 +1044,16 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     // isEditIntent (از classifyImageIntent) یعنی این ادامه‌ی ویرایش یک عکس قبلی همین مکالمه‌ست،
     // حتی اگه کاربر خودش دوباره عکس رو پیوست نکرده باشه («نه، صورتیش کن» بدون آپلود دوباره)
 
+    // سقف مستقل تولید/ویرایش عکس این پلن — قبل از هر ذخیره‌سازی/فراخوانی provider چک می‌شود
+    // (مثل بقیه‌ی preflight‌های streamChat)، چون هر عکس چند برابر گران‌تر از یک پیام معمولی است
+    const rateLimit = await this.tokenService.getImageGenRateLimitStatus(userId, plan)
+    if (rateLimit.blocked) {
+      throw new HttpException(
+        { message: fa.chat.imageGenRateLimited, stage: 'image_gen_rate_limited', resetAt: rateLimit.resetAt },
+        429,
+      )
+    }
+
     // این مسیر (برخلاف چت معمولی) زودتر return می‌کند و هیچ‌وقت به کد ذخیره‌سازی پیام کاربر
     // در streamChat() نمی‌رسد — پس اگر اینجا خودمان پیام کاربر را ذخیره نکنیم، بعد از هر
     // invalidate/refetch (مثلاً پایان استریم) کل پیام کاربر (متن + عکس‌های ورودی) ناپدید می‌شود،
@@ -1098,51 +1093,50 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           })
         : null
 
-    let modelRecord = explicitModelRecord
-    if (!modelRecord) {
-      const candidates = await this.prisma.aiModel.findMany({
-        where: { name: { in: plan.allowedModels }, supportsImageGen: true, isActive: true },
-        orderBy: { sortOrder: 'asc' },
-      })
-      if (!candidates.length) {
-        throw new BadRequestException(fa.chat.imageGenNotSupported)
-      }
+    const candidates = await this.prisma.aiModel.findMany({
+      where: { name: { in: plan.allowedModels }, supportsImageGen: true, isActive: true },
+      orderBy: { sortOrder: 'asc' },
+    })
+    if (!candidates.length) {
+      throw new BadRequestException(fa.chat.imageGenNotSupported)
+    }
 
+    // زنجیره‌ی fallback: اگر مدل دقیقاً درخواست‌شده/پیش‌فرضِ پلن هست اول امتحان می‌شود، بعد
+    // بقیه‌ی مدل‌های ranked (بهترین تطابق کیفیت اول) — اگر اولی fail کند (نه به‌خاطر سیاست
+    // محتوا)، به بعدی fallback می‌شود، نه اینکه کل درخواست fail شود
+    let candidateChain: AiModel[]
+    if (explicitModelRecord) {
+      candidateChain = [explicitModelRecord, ...candidates.filter(c => c.id !== explicitModelRecord.id)]
+    } else {
       const { tier: idealTier, size: idealSize } = await this.classifyImagePrompt(dto.content, userId)
       const ranked = this.rankImageModelCandidates(candidates, idealTier, idealSize)
+      const defaultRecord = plan.defaultImageGenModel
+        ? ranked.find(c => c.name === plan.defaultImageGenModel)
+        : undefined
+      candidateChain = defaultRecord
+        ? [defaultRecord, ...ranked.filter(c => c.id !== defaultRecord.id)]
+        : ranked
+    }
 
-      if (plan.isPayAsYouGo) {
-        const markup = plan.payAsYouGoMarkup ?? 1.3
-        const balance = await this.pricingService.getWalletBalance(userId)
-        // بین همه‌ی گزینه‌ها (به ترتیب بهترین تطابق کیفیت اول)، اولین گزینه‌ای که کیف‌پول
-        // برایش کافی است انتخاب می‌شود — بهترین کیفیتی که کاربر واقعاً می‌تواند بپردازد،
-        // نه لزوماً ارزان‌ترین. اگر even ارزان‌ترین گزینه هم کافی نبود، یعنی هیچ‌کدام از
-        // کل لیست (با هر ترتیبی) قابل‌پرداخت نیست
-        const affordable = await this.firstAffordable(ranked, balance, markup, hasExplicitInputImages || isEditIntent)
-        if (!affordable) {
-          throw new HttpException(
-            { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
-            402,
-          )
-        }
-        modelRecord = affordable
-      } else {
-        modelRecord = ranked[0]
-      }
-    } else if (plan.isPayAsYouGo) {
-      // انتخاب دستی صریح — کیفیت را خودمان پایین نمی‌آوریم (کاربر دقیقاً همین را خواسته)،
-      // فقط چک می‌کنیم کیف‌پول کافی هست یا نه
+    if (plan.isPayAsYouGo) {
       const markup = plan.payAsYouGoMarkup ?? 1.3
       const balance = await this.pricingService.getWalletBalance(userId)
-      const affordable = await this.firstAffordable([modelRecord], balance, markup, hasExplicitInputImages || isEditIntent)
-      if (!affordable) {
+      const hasAnyInputImages = hasExplicitInputImages || isEditIntent
+      const affordableChain: AiModel[] = []
+      for (const candidate of candidateChain) {
+        const { costToman } = await this.pricingService.calcFlatCostToman(
+          this.estimateWorstCaseImageUsd(candidate, hasAnyInputImages),
+        )
+        if (balance >= Math.ceil(costToman * markup)) affordableChain.push(candidate)
+      }
+      if (!affordableChain.length) {
         throw new HttpException(
           { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
           402,
         )
       }
+      candidateChain = affordableChain
     }
-    const modelId = modelRecord.name
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
@@ -1180,22 +1174,40 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         )
       }
 
-      const result = inputImageBuffers.length
-        ? await this.editImageRaw({
-            modelId,
-            prompt: dto.content,
-            images: inputImageBuffers,
-            size: modelRecord.imageGenSize ?? undefined,
-            quality: modelRecord.imageGenQuality ?? undefined,
-            onPartial,
-          })
-        : await this.generateImageRaw({
-            modelId,
-            prompt: dto.content,
-            size: modelRecord.imageGenSize ?? undefined,
-            quality: modelRecord.imageGenQuality ?? undefined,
-            onPartial,
-          })
+      // زنجیره‌ی fallback — روی خطای سیاست محتوا اصلاً fallback نمی‌کنیم (مدل دیگر هم رد
+      // می‌کند، فقط هزینه/تأخیر اضافه می‌شود)، ولی روی خطای شبکه/provider به مدل بعدی می‌رویم
+      let modelRecord: AiModel | null = null
+      let result: Awaited<ReturnType<typeof this.generateImageRaw>> | null = null
+      let lastErr: unknown = null
+      for (const candidate of candidateChain) {
+        try {
+          result = inputImageBuffers.length
+            ? await this.editImageRaw({
+                modelId: candidate.name,
+                prompt: dto.content,
+                images: inputImageBuffers,
+                size: candidate.imageGenSize ?? undefined,
+                quality: candidate.imageGenQuality ?? undefined,
+                onPartial,
+              })
+            : await this.generateImageRaw({
+                modelId: candidate.name,
+                prompt: dto.content,
+                size: candidate.imageGenSize ?? undefined,
+                quality: candidate.imageGenQuality ?? undefined,
+                onPartial,
+              })
+          modelRecord = candidate
+          lastErr = null
+          break
+        } catch (err) {
+          lastErr = err
+          if (err instanceof ImageApiError && err.isPolicyViolation) throw err
+          this.logger.warn(`image gen failed with model=${candidate.name}, trying next fallback: ${(err as Error).message}`)
+        }
+      }
+      if (!result || !modelRecord) throw lastErr ?? new Error('image generation: no candidate model succeeded')
+      const modelId = modelRecord.name
       this.liveStats.recordLiaraCall('chat', true, Date.now() - callStart).catch(() => {})
 
       const { costToman, costUsdMicros, costInputUsdMicros, costOutputUsdMicros } =
@@ -1231,6 +1243,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
 
       await Promise.all([
         this.pricingService.trackCost(userId, costToman, costUsdMicros),
+        this.tokenService.recordImageGenRequest(userId),
         this.prisma.conversation.update({
           where: { id: conversationId },
           data: { lastMessageAt: new Date() },

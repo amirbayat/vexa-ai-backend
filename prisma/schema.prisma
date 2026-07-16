@@ -101,6 +101,16 @@ model Plan {
   payAsYouGoMinTopupToman      Int?    @default(500000)
   payAsYouGoTopupPresets       Json?   @default("[1000000,2000000,5000000]")
 
+  // تنظیمات تولید/ویرایش عکس مخصوص این پلن — اگر defaultImageGenModel ست شود، به‌جای
+  // طبقه‌بندی خودکار prompt (SIMPLE/MEDIUM/COMPLEX)، اول همین مدل مشخص (با کیفیت/ابعاد خودش)
+  // امتحان می‌شود؛ اگر fail کند، به بقیه‌ی مدل‌های supportsImageGen این پلن fallback می‌شود.
+  // سقف‌های تعداد درخواست هم مستقل از سهمیه‌ی توکنی/پیامی معمولی این پلن هستند — چون هر عکس
+  // چند برابر گران‌تر از یک پیام متنی است.
+  defaultImageGenModel String?
+  maxImageGenPerDay    Int? // null = بدون سقف روزانه
+  maxImageGenPerWindow Int? // null = بدون سقف پنجره‌ی لغزان
+  imageGenWindowHours  Int? @default(24)
+
   subscriptions Subscription[]
   payments      Payment[]
   routingSteps  PlanRoutingStep[]
