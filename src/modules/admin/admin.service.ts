@@ -7,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { ExchangeRateService } from '../../exchange-rate/exchange-rate.service'
 import { PricingService } from '../usage/pricing.service'
+import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service'
 import { fa } from '../../i18n/fa'
 import { CreateModelDto, MODEL_TIERS, TOKENIZER_FAMILIES } from './dto/create-model.dto'
 import { UpdateModelDto } from './dto/update-model.dto'
@@ -83,6 +84,7 @@ export class AdminService {
     private readonly config: ConfigService,
     private readonly exchangeRate: ExchangeRateService,
     private readonly pricingService: PricingService,
+    private readonly usageAnalytics: UsageAnalyticsService,
   ) {
     // همون درصدی که PricingService برای بودجه‌ی واقعی مصرف می‌کند — برای اینکه
     // «انتظار مصرف» ادمین با محدودیت واقعی چت هماهنگ بماند، نه یک 0.7 هاردکد جدا
@@ -145,7 +147,7 @@ export class AdminService {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
     const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
 
-    const [users, total, monthlyRevenue] = await Promise.all([
+    const [users, total, monthlyRevenue, imageModelNames] = await Promise.all([
       this.prisma.user.findMany({
         where,
         skip,
@@ -174,6 +176,7 @@ export class AdminService {
         where: { status: 'COMPLETED', createdAt: { gte: startOfMonth } },
         _sum: { amount: true },
       }),
+      this.usageAnalytics.getImageModelNames(),
     ])
 
     const revenueMap = new Map(monthlyRevenue.map(r => [r.userId, r._sum.amount ?? 0]))
@@ -188,12 +191,22 @@ export class AdminService {
       startOfMonth,
     )
 
-    const usageRows = users.length
-      ? await this.prisma.dailyUsage.findMany({
-        where: { userId: { in: users.map(u => u.id) }, date: { gte: earliestWindowStart } },
+    const userIds = users.map(u => u.id)
+    const [usageRows, messageRows] = await Promise.all([
+      this.prisma.dailyUsage.findMany({
+        where: { userId: { in: userIds }, date: { gte: earliestWindowStart } },
         select: { userId: true, date: true, costToman: true, costUsdMicros: true },
-      })
-      : []
+      }),
+      // برای تفکیک مصرف متن/عکس نیاز به سطح پیام داریم — DailyUsage این تفکیک را
+      // نگه نمی‌دارد (فقط جمع کل روزانه)
+      this.prisma.message.findMany({
+        where: {
+          userId: { in: userIds }, role: 'ASSISTANT', model: { not: null },
+          createdAt: { gte: earliestWindowStart },
+        },
+        select: { userId: true, model: true, costToman: true, costUsdMicros: true, createdAt: true },
+      }),
+    ])
 
     const enriched = users.map(u => {
       const windowStart = windowStartFor(u)
@@ -201,6 +214,14 @@ export class AdminService {
       const aiCost = rowsForUser.reduce((sum, r) => sum + r.costToman, 0)
       const aiCostUsd = rowsForUser.reduce((sum, r) => sum + r.costUsdMicros, 0) / 1_000_000
       const charged = revenueMap.get(u.id) ?? 0
+
+      const msgRowsForUser = messageRows.filter(r => r.userId === u.id && r.createdAt >= windowStart)
+      const textRows = msgRowsForUser.filter(r => !imageModelNames.has(r.model as string))
+      const imageRows = msgRowsForUser.filter(r => imageModelNames.has(r.model as string))
+      const aiCostTextThisMonth = textRows.reduce((sum, r) => sum + r.costToman, 0)
+      const aiCostImageThisMonth = imageRows.reduce((sum, r) => sum + r.costToman, 0)
+      const aiCostTextUsdThisMonth = textRows.reduce((sum, r) => sum + r.costUsdMicros, 0) / 1_000_000
+      const aiCostImageUsdThisMonth = imageRows.reduce((sum, r) => sum + r.costUsdMicros, 0) / 1_000_000
 
       const priceMonthly = u.subscription?.plan.priceMonthly ?? 0
       const monthlyBudget = Math.floor(priceMonthly * this.aiShare)
@@ -238,7 +259,18 @@ export class AdminService {
         + `aiCostThisPeriod=${aiCost} (پنجره از ${windowStart.toISOString()} تا الان) ratio=${ratio.toFixed(3)} category=${category}`,
       )
 
-      return { ...u, chargedThisMonth: charged, aiCostThisMonth: aiCost, aiCostUsdThisMonth: aiCostUsd, expectedByNow, category }
+      return {
+        ...u,
+        chargedThisMonth: charged,
+        aiCostThisMonth: aiCost,
+        aiCostUsdThisMonth: aiCostUsd,
+        aiCostTextThisMonth,
+        aiCostImageThisMonth,
+        aiCostTextUsdThisMonth,
+        aiCostImageUsdThisMonth,
+        expectedByNow,
+        category,
+      }
     })
 
     return { users: enriched, total, page, limit }
@@ -265,7 +297,10 @@ export class AdminService {
     })
     if (!user) throw new NotFoundException(fa.users.notFound)
 
-    const [walletTransactions, payments, dailyUsage] = await Promise.all([
+    const now = new Date()
+    const thirtyDaysAgo = new Date(now.getTime() - 29 * 86_400_000)
+
+    const [walletTransactions, payments, dailyUsage, modelBreakdown] = await Promise.all([
       user.wallet
         ? this.prisma.walletTransaction.findMany({
             where: { walletId: user.wallet.id },
@@ -284,7 +319,20 @@ export class AdminService {
         orderBy: { date: 'desc' },
         take: 30,
       }),
+      // تفکیک مصرف متن/عکس ۳۰ روز اخیر — همون منطق modelType که در صفحه‌ی
+      // «آنالیز مصرف» استفاده می‌شود، اینجا برای یک کاربر خاص
+      this.usageAnalytics.getModelBreakdown({ from: thirtyDaysAgo, to: now }, userId),
     ])
+
+    const sumTypeUsage = (rows: typeof modelBreakdown) => ({
+      messages: rows.reduce((s, r) => s + r.messages, 0),
+      tokensInput: rows.reduce((s, r) => s + r.tokensInput, 0),
+      tokensOutput: rows.reduce((s, r) => s + r.tokensOutput, 0),
+      costToman: rows.reduce((s, r) => s + r.costToman, 0),
+      costUsd: rows.reduce((s, r) => s + r.costUsd, 0),
+      // modelBreakdown از قبل بر اساس costToman نزولی مرتب است
+      mostUsedModel: rows[0]?.model ?? null,
+    })
 
     return {
       user,
@@ -292,6 +340,8 @@ export class AdminService {
       walletTransactions,
       payments,
       dailyUsage,
+      textUsage: sumTypeUsage(modelBreakdown.filter(m => m.modelType === 'TEXT')),
+      imageUsage: sumTypeUsage(modelBreakdown.filter(m => m.modelType === 'IMAGE')),
     }
   }
 

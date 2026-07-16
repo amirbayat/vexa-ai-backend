@@ -93,6 +93,15 @@ function summarizeModelTypeBreakdown(rows: ModelBreakdownRow[]) {
   }
 }
 
+export interface UserTypeUsage {
+  messages: number
+  tokensInput: number
+  tokensOutput: number
+  costToman: number
+  costUsd: number
+  mostUsedModel: string | null
+}
+
 export interface UserUsageRow {
   userId: string
   phone: string | null
@@ -108,6 +117,8 @@ export interface UserUsageRow {
   marginToman: number
   mostUsedModel: string | null
   segment: string | null
+  text: UserTypeUsage
+  image: UserTypeUsage
 }
 
 /**
@@ -241,8 +252,9 @@ export class UsageAnalyticsService {
   }
 
   // مدل‌های تولید عکس روی جدول AiModel با modelType=IMAGE_GEN مشخص می‌شن؛
-  // Message.model فقط یه رشته‌ست (نه relation)، پس تطبیق با اسم مدل انجام می‌شه
-  private async getImageModelNames(): Promise<Set<string>> {
+  // Message.model فقط یه رشته‌ست (نه relation)، پس تطبیق با اسم مدل انجام می‌شه —
+  // public است چون AdminService هم برای تفکیک مصرف متن/عکس صفحه‌ی کاربران از آن استفاده می‌کند
+  async getImageModelNames(): Promise<Set<string>> {
     const rows = await this.prisma.aiModel.findMany({
       where: { modelType: 'IMAGE_GEN' },
       select: { name: true },
@@ -380,7 +392,7 @@ export class UsageAnalyticsService {
   async getUsers(range: DateRange, segmentLabel?: string): Promise<UserUsageRow[]> {
     const days = daysBetweenInclusive(range.from, range.to)
 
-    const [perUserModel, revenueRows, segments] = await Promise.all([
+    const [perUserModel, revenueRows, segments, imageModelNames] = await Promise.all([
       this.prisma.message.groupBy({
         by: ['userId', 'model'],
         where: { role: 'ASSISTANT', userId: { not: null }, createdAt: { gte: range.from, lte: range.to } },
@@ -393,9 +405,10 @@ export class UsageAnalyticsService {
         _sum: { amount: true },
       }),
       this.listSegments(),
+      this.getImageModelNames(),
     ])
 
-    interface Agg {
+    interface TypeAgg {
       messages: number
       tokensInput: number
       tokensOutput: number
@@ -403,23 +416,28 @@ export class UsageAnalyticsService {
       costUsdMicros: number
       modelCounts: Map<string, number>
     }
-    const byUser = new Map<string, Agg>()
-    for (const row of perUserModel) {
-      const uid = row.userId as string
-      const agg = byUser.get(uid) ?? {
-        messages: 0,
-        tokensInput: 0,
-        tokensOutput: 0,
-        costToman: 0,
-        costUsdMicros: 0,
-        modelCounts: new Map<string, number>(),
-      }
+    const emptyTypeAgg = (): TypeAgg => ({
+      messages: 0, tokensInput: 0, tokensOutput: 0, costToman: 0, costUsdMicros: 0,
+      modelCounts: new Map<string, number>(),
+    })
+    interface Agg extends TypeAgg {
+      text: TypeAgg
+      image: TypeAgg
+    }
+    const addRowTo = (agg: TypeAgg, row: (typeof perUserModel)[number]) => {
       agg.messages += row._count.id
       agg.tokensInput += row._sum.tokensInput ?? 0
       agg.tokensOutput += row._sum.tokensOutput ?? 0
       agg.costToman += row._sum.costToman ?? 0
       agg.costUsdMicros += row._sum.costUsdMicros ?? 0
       if (row.model) agg.modelCounts.set(row.model, (agg.modelCounts.get(row.model) ?? 0) + row._count.id)
+    }
+    const byUser = new Map<string, Agg>()
+    for (const row of perUserModel) {
+      const uid = row.userId as string
+      const agg = byUser.get(uid) ?? { ...emptyTypeAgg(), text: emptyTypeAgg(), image: emptyTypeAgg() }
+      addRowTo(agg, row)
+      addRowTo(imageModelNames.has(row.model ?? '') ? agg.image : agg.text, row)
       byUser.set(uid, agg)
     }
 
@@ -433,14 +451,23 @@ export class UsageAnalyticsService {
       : []
     const userMap = new Map(users.map((u) => [u.id, u]))
 
+    const topModelOf = (agg: TypeAgg) =>
+      [...agg.modelCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
+    const toTypeUsage = (agg: TypeAgg): UserTypeUsage => ({
+      messages: agg.messages,
+      tokensInput: agg.tokensInput,
+      tokensOutput: agg.tokensOutput,
+      costToman: agg.costToman,
+      costUsd: agg.costUsdMicros / 1_000_000,
+      mostUsedModel: topModelOf(agg),
+    })
+
     let results: UserUsageRow[] = userIds.map((userId) => {
       const agg = byUser.get(userId)!
       const revenueToman = revenueMap.get(userId) ?? 0
       const avgMessagesPerDay = agg.messages / days
       const avgTokensPerDay = (agg.tokensInput + agg.tokensOutput) / days
       const segment = this.matchSegment(segments, avgMessagesPerDay, avgTokensPerDay)
-      const mostUsedModel =
-        [...agg.modelCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
       const user = userMap.get(userId)
       return {
         userId,
@@ -455,8 +482,10 @@ export class UsageAnalyticsService {
         costUsd: agg.costUsdMicros / 1_000_000,
         revenueToman,
         marginToman: revenueToman - agg.costToman,
-        mostUsedModel,
+        mostUsedModel: topModelOf(agg),
         segment: segment?.label ?? null,
+        text: toTypeUsage(agg.text),
+        image: toTypeUsage(agg.image),
       }
     })
 
@@ -470,6 +499,8 @@ export class UsageAnalyticsService {
       'شماره موبایل', 'نام', 'تعداد پیام', 'میانگین پیام روزانه',
       'توکن ورودی', 'توکن خروجی', 'هزینه (تومان)', 'هزینه (دلار)',
       'درآمد (تومان)', 'حاشیه سود (تومان)', 'پرمصرف‌ترین مدل', 'دسته',
+      'پیام متن', 'هزینه متن (تومان)', 'پرمصرف‌ترین مدل متن',
+      'پیام عکس', 'هزینه عکس (تومان)', 'پرمصرف‌ترین مدل عکس',
     ]
     const lines = [header.join(',')]
     for (const u of users) {
@@ -478,6 +509,8 @@ export class UsageAnalyticsService {
           u.phone, u.name, u.messages, u.avgMessagesPerDay.toFixed(1),
           u.tokensInput, u.tokensOutput, u.costToman, u.costUsd.toFixed(4),
           u.revenueToman, u.marginToman, u.mostUsedModel, u.segment,
+          u.text.messages, u.text.costToman, u.text.mostUsedModel,
+          u.image.messages, u.image.costToman, u.image.mostUsedModel,
         ]
           .map(csvEscape)
           .join(','),

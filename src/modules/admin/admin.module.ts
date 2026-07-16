@@ -6,9 +6,10 @@ import { RedisModule } from '../../redis/redis.module'
 import { TicketsModule } from '../tickets/tickets.module'
 import { ExchangeRateModule } from '../../exchange-rate/exchange-rate.module'
 import { UsageModule } from '../usage/usage.module'
+import { UsageAnalyticsModule } from '../usage-analytics/usage-analytics.module'
 
 @Module({
-  imports: [PrismaModule, RedisModule, TicketsModule, ExchangeRateModule, UsageModule],
+  imports: [PrismaModule, RedisModule, TicketsModule, ExchangeRateModule, UsageModule, UsageAnalyticsModule],
   controllers: [AdminController],
   providers: [AdminService],
 })
