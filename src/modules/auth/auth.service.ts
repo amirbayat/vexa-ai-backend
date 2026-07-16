@@ -26,6 +26,16 @@ const TEST_PHONE = '09001111111'
 const TEST_OTP_CODE = '123654'
 const TEST_USER_NAME = 'تست'
 
+const PLAN_SUMMARY_SELECT = {
+  name: true,
+  priceMonthly: true,
+  dailyFreeTokens: true,
+  monthlyTotalTokens: true,
+  allowedModels: true,
+  featuredModels: true,
+  featuredModelsCount: true,
+} as const
+
 function normalizePhone(phone: string): string {
   return phone.replace(/^\+98/, '0').replace(/^98/, '0')
 }
@@ -235,7 +245,7 @@ export class AuthService {
   }
 
   async getMe(userId: string) {
-    return this.prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -248,21 +258,24 @@ export class AuthService {
           select: {
             status: true,
             periodEnd: true,
-            plan: {
-              select: {
-                name: true,
-                priceMonthly: true,
-                dailyFreeTokens: true,
-                monthlyTotalTokens: true,
-                allowedModels: true,
-                featuredModels: true,
-                featuredModelsCount: true,
-              },
-            },
+            plan: { select: PLAN_SUMMARY_SELECT },
           },
         },
       },
     })
+    if (!user) return null
+
+    // کاربر رایگان هیچ‌وقت رکورد Subscription ندارد (فقط با خرید ساخته می‌شود) — پس بدون این
+    // fallback، تنظیمات پلن رایگان (مثل featuredModels) هیچ‌وقت به فرانت نمی‌رسید. همون قرارداد
+    // «پلن رایگان = priceMonthly صفر» که token.service.ts (getCachedPlan) هم برای سهمیه/مسیریابی
+    // مدل استفاده می‌کند، اینجا هم برای همون هدف تکرار شده.
+    const plan = user.subscription?.plan ?? await this.prisma.plan.findFirst({
+      where: { priceMonthly: 0, isActive: true },
+      orderBy: { sortOrder: 'asc' },
+      select: PLAN_SUMMARY_SELECT,
+    })
+
+    return { ...user, plan }
   }
 
   private async issueTokens(userId: string, phone: string, role: string) {
