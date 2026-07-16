@@ -4,6 +4,7 @@ import { validate } from './config/env.validation'
 import { PrismaModule } from './prisma/prisma.module'
 import { RedisModule } from './redis/redis.module'
 import { StorageModule } from './storage/storage.module'
+import { RateLimitModule } from './rate-limit/rate-limit.module'
 import { AuthModule } from './modules/auth/auth.module'
 import { UsageModule } from './modules/usage/usage.module'
 import { PlansModule } from './modules/plans/plans.module'
@@ -35,6 +36,7 @@ import { QueueModule } from './queue/queue.module'
     PrismaModule,
     RedisModule,
     StorageModule,
+    RateLimitModule,
     QueueModule,
     AuthModule,
     UsageModule,
