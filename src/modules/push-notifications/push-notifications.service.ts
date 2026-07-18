@@ -20,8 +20,9 @@ export class PushNotificationsService {
     const normalizedPhoneList = dto.segment === PushCampaignSegment.PHONE_LIST
       ? (dto.phoneList ?? []).map(normalizePhone)
       : []
+    const planIds = dto.segment === PushCampaignSegment.BY_PLAN ? (dto.planIds ?? []) : []
 
-    const tokens = await this.resolveTokens(dto.segment, normalizedPhoneList)
+    const tokens = await this.resolveTokens(dto.segment, normalizedPhoneList, planIds)
 
     const { sentCount, failedCount, invalidTokens } = await this.fcm.sendToTokens(tokens, dto.title, dto.body)
 
@@ -36,6 +37,7 @@ export class PushNotificationsService {
         body: dto.body,
         segment: dto.segment,
         phoneList: normalizedPhoneList,
+        planIds,
         sentCount,
         failedCount,
         createdByAdminId: adminId,
@@ -43,8 +45,9 @@ export class PushNotificationsService {
     })
   }
 
-  private async resolveTokens(segment: PushCampaignSegment, phoneList: string[]): Promise<string[]> {
+  private async resolveTokens(segment: PushCampaignSegment, phoneList: string[], planIds: string[]): Promise<string[]> {
     if (segment === PushCampaignSegment.PHONE_LIST && !phoneList.length) return []
+    if (segment === PushCampaignSegment.BY_PLAN && !planIds.length) return []
 
     const where = (() => {
       switch (segment) {
@@ -56,6 +59,8 @@ export class PushNotificationsService {
           return { userId: null }
         case PushCampaignSegment.ACTIVE_SUBSCRIBERS:
           return { user: { subscription: { is: { status: { in: ['ACTIVE', 'TRIAL'] as SubscriptionStatus[] } } } } }
+        case PushCampaignSegment.BY_PLAN:
+          return { user: { subscription: { is: { planId: { in: planIds }, status: { in: ['ACTIVE', 'TRIAL'] as SubscriptionStatus[] } } } } }
         case PushCampaignSegment.PHONE_LIST:
           return { user: { phone: { in: phoneList } } }
       }

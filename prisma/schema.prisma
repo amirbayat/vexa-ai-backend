@@ -1013,6 +1013,7 @@ model PushCampaign {
   body             String
   segment          PushCampaignSegment
   phoneList        String[]            @default([])
+  planIds          String[]            @default([]) // فقط وقتی segment = BY_PLAN
   sentCount        Int                 @default(0)
   failedCount      Int                 @default(0)
   createdByAdminId String
@@ -1028,5 +1029,6 @@ enum PushCampaignSegment {
   REGISTERED_ONLY
   ANONYMOUS_ONLY
   ACTIVE_SUBSCRIBERS
+  BY_PLAN
   PHONE_LIST
 }

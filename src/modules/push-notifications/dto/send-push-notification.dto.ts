@@ -1,4 +1,4 @@
-import { ArrayNotEmpty, IsArray, IsEnum, IsNotEmpty, IsString, MaxLength, ValidateIf } from 'class-validator'
+import { ArrayNotEmpty, IsArray, IsEnum, IsNotEmpty, IsString, IsUUID, MaxLength, ValidateIf } from 'class-validator'
 import { PushCampaignSegment } from '@prisma/client'
 import { fa } from '../../../i18n/fa'
 
@@ -22,4 +22,11 @@ export class SendPushNotificationDto {
   @ArrayNotEmpty({ message: fa.validation.required })
   @IsString({ each: true, message: fa.validation.required })
   phoneList?: string[]
+
+  // فقط وقتی segment = BY_PLAN الزامی است — یک یا چند پلن (مثلاً «پلاس» و «اکو» با هم)
+  @ValidateIf((dto) => dto.segment === PushCampaignSegment.BY_PLAN)
+  @IsArray({ message: fa.validation.mustBeArray })
+  @ArrayNotEmpty({ message: fa.validation.required })
+  @IsUUID('4', { each: true, message: fa.validation.required })
+  planIds?: string[]
 }
