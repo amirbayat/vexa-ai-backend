@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { getMessaging } from 'firebase-admin/messaging'
 import { FirebaseAdminAppProvider } from '../../common/firebase/firebase-admin-app.provider'
 
@@ -16,11 +16,16 @@ export interface PushSendResult {
 // کاربران می‌تواند از سقف ۵۰۰تایی sendEachForMulticast بیشتر باشد
 @Injectable()
 export class PushFcmService {
+  private readonly logger = new Logger(PushFcmService.name)
+
   constructor(private readonly firebase: FirebaseAdminAppProvider) {}
 
   async sendToTokens(tokens: string[], title: string, body: string): Promise<PushSendResult> {
     const app = this.firebase.getApp()
     if (!app || !tokens.length) {
+      this.logger.warn(
+        `sendToTokens: no-op (app=${!!app ? 'initialized' : 'null — FIREBASE_SERVICE_ACCOUNT تنظیم نشده'}, tokens=${tokens.length})`,
+      )
       return { sentCount: 0, failedCount: tokens.length, invalidTokens: [] }
     }
 
@@ -36,10 +41,24 @@ export class PushFcmService {
       })
       sentCount += response.successCount
       failedCount += response.failureCount
+
+      // پاسخ کامل هر توکن را لاگ می‌کنیم — روی موفقیت فقط messageId، روی شکست کد/پیام خطای
+      // واقعی Firebase (مثلاً messaging/registration-token-not-registered،
+      // messaging/mismatched-credential وقتی توکن مال یک پروژه‌ی Firebase دیگر است)
       response.responses.forEach((r, idx) => {
-        if (!r.success) invalidTokens.push(chunk[idx])
+        const token = chunk[idx]
+        if (r.success) {
+          this.logger.log(`FCM OK token=${token.slice(0, 16)}... messageId=${r.messageId}`)
+        } else {
+          this.logger.error(
+            `FCM FAILED token=${token.slice(0, 16)}... code=${r.error?.code} message=${r.error?.message}`,
+          )
+          invalidTokens.push(token)
+        }
       })
     }
+
+    this.logger.log(`sendToTokens: done — sentCount=${sentCount} failedCount=${failedCount} invalidTokens=${invalidTokens.length}`)
 
     return { sentCount, failedCount, invalidTokens }
   }
