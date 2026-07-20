@@ -5,6 +5,7 @@ import { validate } from './config/env.validation'
 import { AllExceptionsFilter } from './common/filters/http-exception.filter'
 import { PrismaModule } from './prisma/prisma.module'
 import { RedisModule } from './redis/redis.module'
+import { HealthModule } from './health/health.module'
 import { StorageModule } from './storage/storage.module'
 import { RateLimitModule } from './rate-limit/rate-limit.module'
 import { AuthModule } from './modules/auth/auth.module'
@@ -40,6 +41,7 @@ import { QueueModule } from './queue/queue.module'
     ConfigModule.forRoot({ isGlobal: true, validate }),
     PrismaModule,
     RedisModule,
+    HealthModule,
     StorageModule,
     RateLimitModule,
     QueueModule,
