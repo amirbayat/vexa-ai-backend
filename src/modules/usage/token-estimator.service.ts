@@ -1,14 +1,8 @@
-import { Injectable } from '@nestjs/common'
-import { countTokens as countTokensO200k } from 'gpt-tokenizer/encoding/o200k_base'
-import { countTokens as countTokensCl100k } from 'gpt-tokenizer/encoding/cl100k_base'
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
+import { join } from 'node:path'
+import Piscina from 'piscina'
 import { AiModelRegistryService } from './ai-model-registry.service'
-
-type Counter = (input: string) => number
-
-const EXACT_COUNTERS: Record<string, Counter> = {
-  o200k_base: countTokensO200k, // gpt-4o, gpt-4o-mini, gpt-4.1, ...
-  cl100k_base: countTokensCl100k, // gpt-4, gpt-4-turbo, gpt-3.5-turbo, ...
-}
+import type { TokenEstimateTask } from './token-estimator.worker'
 
 /**
  * Replaces the old `Math.ceil(text.length / 3)` guess (docs/PRD-global-budget-gateway.md بخش ۹).
@@ -21,9 +15,26 @@ const EXACT_COUNTERS: Record<string, Counter> = {
  * commonly cited average for English/Latin text; Persian-heavy models
  * should be recalibrated lower once real usage data is available (compare
  * against the SDK's actual `usage.inputTokens`/`usage.outputTokens`).
+ *
+ * gpt-tokenizer's actual counting is synchronous/CPU-bound — running it on
+ * the main thread blocks Node's single event loop for every concurrent
+ * user, not just the caller (docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۲).
+ * So the counting itself runs on a small worker-thread pool (Piscina);
+ * this service only does the (async, Redis/DB-backed) model lookup on the
+ * main thread and hands the actual text off to a worker.
  */
 @Injectable()
-export class TokenEstimatorService {
+export class TokenEstimatorService implements OnModuleDestroy {
+  private readonly logger = new Logger(TokenEstimatorService.name)
+
+  // maxThreads کوچک عمداً — این CPU-bound است، نه I/O-bound؛ تعداد thread بیشتر از
+  // core های واقعی موجود روی container فقط context-switch اضافه می‌کنه، سرعت نمی‌ده
+  private readonly pool = new Piscina<TokenEstimateTask, number>({
+    filename: join(__dirname, 'token-estimator.worker.js'),
+    minThreads: 1,
+    maxThreads: 2,
+  })
+
   constructor(private readonly modelRegistry: AiModelRegistryService) {}
 
   async estimateTokens(text: string, modelId: string): Promise<number> {
@@ -32,10 +43,10 @@ export class TokenEstimatorService {
     const { tokenizerFamily, avgCharsPerToken } =
       await this.modelRegistry.getModelInfo(modelId)
 
-    const exact = EXACT_COUNTERS[tokenizerFamily]
-    if (exact) return exact(text)
+    return this.pool.run({ text, tokenizerFamily, avgCharsPerToken })
+  }
 
-    const ratio = avgCharsPerToken > 0 ? avgCharsPerToken : 4
-    return Math.ceil(text.length / ratio)
+  async onModuleDestroy() {
+    await this.pool.destroy().catch((err) => this.logger.error('token estimator pool destroy failed', err))
   }
 }
