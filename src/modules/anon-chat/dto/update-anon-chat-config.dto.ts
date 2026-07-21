@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator'
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator'
 import { REASONING_EFFORT_VALUES } from '../../plans/reasoning-effort.constants'
 
 export class UpdateAnonChatConfigDto {
@@ -63,4 +63,17 @@ export class UpdateAnonChatConfigDto {
   @IsString()
   @MaxLength(500)
   hintSubtitle?: string
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(50)
+  signupBannerAfterMessages?: number
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  samplePrompts?: string[]
 }

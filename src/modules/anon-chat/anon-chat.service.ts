@@ -83,6 +83,8 @@ export class AnonChatService {
       remainingFree: Math.max(0, config.freeMessageLimit - identity.lifetimeMessageCount),
       remainingToday: pastFree ? Math.max(0, config.dailyMessageLimitAfterFree - todayCount) : null,
       resetAt: stage === 'blocked' ? nextIranMidnightISO() : null,
+      signupBannerAfterMessages: config.signupBannerAfterMessages,
+      samplePrompts: config.samplePrompts,
     }
   }
 
