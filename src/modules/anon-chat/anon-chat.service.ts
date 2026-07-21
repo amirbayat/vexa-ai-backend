@@ -8,10 +8,11 @@ import {
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText, APICallError } from 'ai'
+import { streamText } from 'ai'
 import type { ModelMessage } from 'ai'
 import type { AnonymousConversation } from '@prisma/client'
 import type { Response } from 'express'
+import { isModelUnavailableError, unwrapAiSdkError } from '../../common/utils/ai-error.util'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { TokenEstimatorService } from '../usage/token-estimator.service'
@@ -164,12 +165,20 @@ export class AnonChatService {
     res.setHeader('X-Accel-Buffering', 'no')
     res.flushHeaders()
 
+    // اگر call به provider fail بشه (مثلاً 500 از Liara)، streamText بعد از exhaust شدن
+    // retry داخلی، خطای واقعی رو توی این error-part callback می‌ده و خودش یک
+    // NoOutputGeneratedError جدید و بدون cause می‌سازه و throw می‌کنه (چون هیچ step‌ای ثبت
+    // نشده) — یعنی اگر این‌جا نگیریمش، در catch زیر گم می‌شه و دیگه غیرقابل unwrap است
+    let capturedProviderError: unknown
     try {
       const result = streamText({
         model: this.buildProvider(apiKey)(config.defaultModel),
         messages: coreMessages,
         maxOutputTokens: config.maxOutputTokens,
         timeout: { chunkMs: 30_000 },
+        onError: ({ error }) => {
+          capturedProviderError = error
+        },
       })
 
       let fullContent = ''
@@ -206,10 +215,12 @@ export class AnonChatService {
 
       res.write('data: [DONE]\n\n')
     } catch (err) {
-      const isModelError = APICallError.isInstance(err)
+      const rootError = capturedProviderError ?? err
+      const isModelError = isModelUnavailableError(rootError)
+      const actualError = unwrapAiSdkError(rootError)
       this.logger.error(
-        `anon streamChat failed (model=${config.defaultModel}): ${err instanceof Error ? err.message : String(err)}`,
-        err instanceof Error ? err.stack : undefined,
+        `anon streamChat failed (model=${config.defaultModel}): ${actualError instanceof Error ? actualError.message : String(actualError)}`,
+        actualError instanceof Error ? actualError.stack : undefined,
       )
       res.write(
         `data: ${JSON.stringify({

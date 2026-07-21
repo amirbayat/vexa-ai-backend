@@ -55,6 +55,17 @@ export class AnonAnalyticsAdminController {
     return this.analytics.funnel(f, t, { utmSource, utmCampaign })
   }
 
+  @Get('conversion-paths')
+  conversionPaths(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('utmSource') utmSource?: string,
+    @Query('utmCampaign') utmCampaign?: string,
+  ) {
+    const { from: f, to: t } = parseRange(from, to)
+    return this.analytics.conversionPaths(f, t, { utmSource, utmCampaign })
+  }
+
   @Get('campaigns')
   campaigns(@Query('from') from?: string, @Query('to') to?: string) {
     const { from: f, to: t } = parseRange(from, to)

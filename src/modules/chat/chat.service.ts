@@ -9,10 +9,11 @@ import {
 import { ConfigService } from '@nestjs/config'
 import * as crypto from 'crypto'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText, generateObject, APICallError, RetryError } from 'ai'
+import { streamText, generateObject, APICallError } from 'ai'
 import type { ModelMessage, UserModelMessage } from 'ai'
 import { ModelTier, Prisma, type AiModel } from '@prisma/client'
 import { z } from 'zod'
+import { isModelUnavailableError, unwrapAiSdkError } from '../../common/utils/ai-error.util'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { TokenService, rollingWindowKey, type PlanLimits } from '../usage/token.service'
@@ -121,6 +122,11 @@ export class ChatService {
     maxOutputTokens: number
     apiKey: string
   }): Promise<string> {
+    // اگر provider call fail بشه (بعد از exhaust شدن retry داخلی)، streamText خودش یک
+    // NoOutputGeneratedError جدید و بدون cause می‌سازه و throw می‌کنه (چون هیچ step‌ای ثبت
+    // نشده) — خطای واقعی (RetryError/APICallError) فقط توی همین callback در دسترسه، وگرنه
+    // در catch سطح caller (generateTitle) دیگه قابل unwrap نیست
+    let capturedProviderError: unknown
     const result = streamText({
       model: this.buildProvider(params.apiKey)(params.modelId),
       system: params.system,
@@ -134,10 +140,17 @@ export class ChatService {
       // بدون timeout صریح، یک تماس معلق‌مانده به Liara منابع را نامحدود نگه می‌داشت
       // (docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۸) — این‌ها کارهای کوچک و کوتاهند
       timeout: 20_000,
+      onError: ({ error }) => {
+        capturedProviderError = error
+      },
     })
     let text = ''
-    for await (const chunk of result.textStream) {
-      text += chunk
+    try {
+      for await (const chunk of result.textStream) {
+        text += chunk
+      }
+    } catch (err) {
+      throw capturedProviderError ?? err
     }
     return text
   }
@@ -447,6 +460,11 @@ export class ChatService {
     // درست قبل از streamText دوباره ست می‌شود تا «تأخیر چت» واقعاً فقط زمان مدل را اندازه بگیرد
     // (نه topic classify/DB/عنوان‌سازی که قبلاً به‌اشتباه داخل همین بازه حساب می‌شدند)
     let chatCallStart = Date.now()
+    // اگر provider call fail بشه، streamText بعد از exhaust شدن retry داخلی یک
+    // NoOutputGeneratedError جدید و بدون cause throw می‌کنه (چون هیچ step‌ای ثبت نشده) —
+    // خطای واقعی (RetryError/APICallError) فقط توی onError در دسترسه، وگرنه در catch پایین
+    // دیگه قابل unwrap نیست
+    let capturedProviderError: unknown
 
     try {
       const topicId = await this.topicService.classify(dto.content)
@@ -539,6 +557,9 @@ export class ChatService {
         // میزان reasoning effort قابل‌تنظیم در ادمین — پیش‌فرض پلن، با امکان override به‌ازای
         // استپ بودجه‌ای (مسیریابی مدل). null یعنی از پیش‌فرض provider استفاده شود (کلید ست نمی‌شود)
         ...(routed.reasoningEffort ? { reasoning: routed.reasoningEffort as ReasoningEffort } : {}),
+        onError: ({ error }) => {
+          capturedProviderError = error
+        },
       })
 
       let fullContent = ''
@@ -672,11 +693,13 @@ export class ChatService {
 
       res.write(`data: [DONE]\n\n`)
     } catch (err: unknown) {
-      const isModelError = APICallError.isInstance(err)
+      const rootError = capturedProviderError ?? err
+      const isModelError = isModelUnavailableError(rootError)
+      const actualError = unwrapAiSdkError(rootError)
       const message = isModelError ? fa.chat.modelUnavailable : fa.chat.streamError
       this.logger.error(
-        `streamChat failed (model=${modelId}): ${err instanceof Error ? err.message : String(err)}`,
-        err instanceof Error ? err.stack : undefined,
+        `streamChat failed (model=${modelId}): ${actualError instanceof Error ? actualError.message : String(actualError)}`,
+        actualError instanceof Error ? actualError.stack : undefined,
       )
       res.write(
         `data: ${JSON.stringify({ error: message, code: isModelError ? 'model_unavailable' : 'stream_error' })}\n\n`,
@@ -1355,9 +1378,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       return null
     } catch (err) {
       this.liveStats.recordLiaraCall('title', false, Date.now() - callStart).catch(() => {})
-      // generateText با retry داخلی، خطای واقعی (APICallError) رو مستقیم پرتاب نمی‌کنه — توی
-      // RetryError.lastError پیچیده شده (تایید شده از stack trace واقعی این خطا در پروداکشن)
-      const actualError = RetryError.isInstance(err) ? err.lastError : err
+      const actualError = unwrapAiSdkError(err)
 
       if (APICallError.isInstance(actualError)) {
         // خطای واقعی سمت Liara/provider — statusCode و responseBody دقیقاً همون چیزیه که

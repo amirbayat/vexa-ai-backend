@@ -147,6 +147,157 @@ export class AnonAnalyticsService {
     }))
   }
 
+  // چهار مسیر محتمل که یک anonymous session ممکن است طی کند تا تبدیل شود (یا نشود) — فانل
+  // ترکیبی بالا (funnel()) همه را روی هم می‌ریزد و نمی‌گوید چند درصد اصلاً نیازی به محدودیت
+  // نداشتند تا ثبت‌نام کنند، یا چند درصد دقیقاً به‌خاطر مسدود شدن از دست رفتند. اینجا سشن‌ها را
+  // بر اساس رویدادهایی که واقعاً تجربه کردند به ۴ گروه دسته‌بندی می‌کنیم:
+  //   early       — قبل از رسیدن به ناحیه‌ی محدود ثبت‌نام کردند (بنر ملایم همیشگی کافی بود)
+  //   limitedZone — ناحیه‌ی محدود را دیدند ولی قبل از مسدود شدن ثبت‌نام کردند
+  //   forced      — فقط بعد از مسدود شدن ثبت‌نام کردند (محدودیت واقعاً آن‌ها را هل داد)
+  //   blockedLost — مسدود شدند و هیچ‌وقت ثبت‌نام نکردند (از دست رفته)
+  // چون بعد از migrate شدن، فرانت دیگر از anon-chat استفاده نمی‌کند (کاربر به /chat می‌رود)،
+  // وجود ENTERED_LIMITED_ZONE/HARD_BLOCKED برای یک session همیشه قبل از signup آن اتفاق افتاده —
+  // نیازی به مقایسه‌ی timestamp نیست، فقط وجود/عدم‌وجود رویداد کافی است.
+  async conversionPaths(from: Date, to: Date, filter: UtmFilter) {
+    const sessions = await this.prisma.anonymousSession.findMany({
+      where: {
+        createdAt: { gte: from, lte: to },
+        ...(filter.utmSource ? { utmSource: filter.utmSource } : {}),
+        ...(filter.utmCampaign ? { utmCampaign: filter.utmCampaign } : {}),
+      },
+      select: {
+        id: true,
+        migratedToUserId: true,
+        migratedAt: true,
+        funnelEvents: { select: { eventType: true } },
+      },
+    })
+
+    type Row = (typeof sessions)[number]
+    const hasEvent = (s: Row, type: AnonFunnelEventType) => s.funnelEvents.some((e) => e.eventType === type)
+
+    const early: Row[] = []
+    const limitedZone: Row[] = []
+    const forced: Row[] = []
+    const blockedLost: Row[] = []
+
+    for (const s of sessions) {
+      const migrated = s.migratedToUserId !== null
+      const blocked = hasEvent(s, 'HARD_BLOCKED')
+      if (blocked && !migrated) {
+        blockedLost.push(s)
+        continue
+      }
+      if (!migrated) continue // bounced و نه مسدود شده و نه ثبت‌نام کرده — در هیچ‌کدام از این ۴ مسیر نیست
+      if (blocked) forced.push(s)
+      else if (hasEvent(s, 'ENTERED_LIMITED_ZONE')) limitedZone.push(s)
+      else early.push(s)
+    }
+
+    // FIRST_MESSAGE_AFTER_SIGNUP/FIRST_PURCHASE فقط برای سه گروهی که واقعاً ثبت‌نام کردند معنا دارد
+    const migratedRows = [...early, ...limitedZone, ...forced]
+    const postSignupFlags = new Map<string, { hasFirstMessage: boolean; hasPurchase: boolean }>()
+    await Promise.all(
+      migratedRows.map(async (s) => {
+        const userId = s.migratedToUserId!
+        const migratedAt = s.migratedAt ?? new Date(0)
+        const [msgCount, paymentCount] = await Promise.all([
+          this.prisma.message.count({ where: { userId, role: 'USER', createdAt: { gt: migratedAt } } }),
+          this.prisma.payment.count({ where: { userId, status: 'COMPLETED' } }),
+        ])
+        postSignupFlags.set(s.id, { hasFirstMessage: msgCount > 0, hasPurchase: paymentCount > 0 })
+      }),
+    )
+
+    const countOf = (rows: Row[], key: AnonFunnelEventType | 'MIGRATED' | 'FIRST_MSG_AFTER' | 'PURCHASE') => {
+      if (key === 'MIGRATED') return rows.filter((r) => r.migratedToUserId !== null).length
+      if (key === 'FIRST_MSG_AFTER') return rows.filter((r) => postSignupFlags.get(r.id)?.hasFirstMessage).length
+      if (key === 'PURCHASE') return rows.filter((r) => postSignupFlags.get(r.id)?.hasPurchase).length
+      return rows.filter((r) => hasEvent(r, key)).length
+    }
+
+    const STAGE_LABELS: Record<string, string> = {
+      SESSION_CREATED: 'بازدید',
+      FIRST_MESSAGE_SENT: 'اولین پیام',
+      ENTERED_LIMITED_ZONE: 'ورود به ناحیه‌ی محدود',
+      HARD_BLOCKED: 'مسدود شده',
+      CLICKED_SIGNUP_CTA: 'کلیک روی ثبت‌نام',
+      MIGRATED: 'ثبت‌نام کامل',
+      FIRST_MSG_AFTER: 'اولین پیام بعد از ثبت‌نام',
+      PURCHASE: 'اولین خرید',
+    }
+
+    function buildSegment(
+      key: string,
+      label: string,
+      description: string,
+      rows: Row[],
+      stageKeys: (AnonFunnelEventType | 'MIGRATED' | 'FIRST_MSG_AFTER' | 'PURCHASE')[],
+    ) {
+      const counts = stageKeys.map((k) => countOf(rows, k))
+      return {
+        key,
+        label,
+        description,
+        sessionCount: rows.length,
+        stages: stageKeys.map((k, i) => ({
+          key: k,
+          label: STAGE_LABELS[k],
+          count: counts[i],
+          dropOffPct: i === 0 || counts[i - 1] === 0 ? 0 : Math.round((1 - counts[i] / counts[i - 1]) * 1000) / 10,
+        })),
+      }
+    }
+
+    return [
+      buildSegment(
+        'early',
+        'تبدیل زودهنگام (بدون برخورد به محدودیت)',
+        'کاربرانی که با همان بنر ملایم همیشگی، قبل از رسیدن به سقف پیام رایگان ثبت‌نام کردند.',
+        early,
+        ['SESSION_CREATED', 'FIRST_MESSAGE_SENT', 'CLICKED_SIGNUP_CTA', 'MIGRATED', 'FIRST_MSG_AFTER', 'PURCHASE'],
+      ),
+      buildSegment(
+        'limitedZone',
+        'تبدیل در ناحیه‌ی محدود',
+        'سقف پیام رایگان تمام شد ولی قبل از مسدود شدن کامل، ثبت‌نام کردند.',
+        limitedZone,
+        [
+          'SESSION_CREATED',
+          'FIRST_MESSAGE_SENT',
+          'ENTERED_LIMITED_ZONE',
+          'CLICKED_SIGNUP_CTA',
+          'MIGRATED',
+          'FIRST_MSG_AFTER',
+          'PURCHASE',
+        ],
+      ),
+      buildSegment(
+        'forced',
+        'تبدیل اجباری (بعد از مسدود شدن)',
+        'فقط بعد از مسدود شدن کامل (سقف روزانه هم تمام شد) ثبت‌نام کردند — محدودیت واقعاً محرک تصمیم بود.',
+        forced,
+        [
+          'SESSION_CREATED',
+          'FIRST_MESSAGE_SENT',
+          'ENTERED_LIMITED_ZONE',
+          'HARD_BLOCKED',
+          'CLICKED_SIGNUP_CTA',
+          'MIGRATED',
+          'FIRST_MSG_AFTER',
+          'PURCHASE',
+        ],
+      ),
+      buildSegment(
+        'blockedLost',
+        'مسدود شده ولی هرگز ثبت‌نام نکرده (از دست رفته)',
+        'به سقف روزانه رسیدند ولی هیچ‌وقت ثبت‌نام را کامل نکردند — نشان می‌دهد محدودیت چقدر کاربر را فراری می‌دهد نه جذب.',
+        blockedLost,
+        ['SESSION_CREATED', 'FIRST_MESSAGE_SENT', 'ENTERED_LIMITED_ZONE', 'HARD_BLOCKED', 'CLICKED_SIGNUP_CTA'],
+      ),
+    ]
+  }
+
   async campaigns(from: Date, to: Date) {
     const sessionRows = await this.prisma.anonymousSession.findMany({
       where: { createdAt: { gte: from, lte: to } },
