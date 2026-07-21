@@ -8,6 +8,7 @@ import { JwtStrategy } from './jwt.strategy'
 import { SmsModule } from '../../sms/sms.module'
 import { CampaignModule } from '../campaign/campaign.module'
 import { DeviceTokensModule } from '../device-tokens/device-tokens.module'
+import { AnonChatModule } from '../anon-chat/anon-chat.module'
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { DeviceTokensModule } from '../device-tokens/device-tokens.module'
     SmsModule,
     CampaignModule,
     DeviceTokensModule,
+    AnonChatModule,
   ],
   controllers: [AuthController, AdminOtpController],
   providers: [AuthService, JwtStrategy],

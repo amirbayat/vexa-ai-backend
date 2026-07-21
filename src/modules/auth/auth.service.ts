@@ -12,6 +12,7 @@ import { RedisService } from '../../redis/redis.service'
 import { SmsService } from '../../sms/sms.service'
 import { CampaignService } from '../campaign/campaign.service'
 import { DeviceTokensService } from '../device-tokens/device-tokens.service'
+import { AnonMigrationService } from '../anon-chat/anon-migration.service'
 import { generateShortCode } from '../../common/utils/generate-code'
 import { normalizePhone } from '../../common/utils/normalize-phone'
 import { fa } from '../../i18n/fa'
@@ -55,6 +56,7 @@ export class AuthService {
     private readonly sms: SmsService,
     private readonly campaign: CampaignService,
     private readonly deviceTokens: DeviceTokensService,
+    private readonly anonMigration: AnonMigrationService,
   ) {}
 
   private isTestUserEnabled(): boolean {
@@ -158,7 +160,7 @@ export class AuthService {
     }
   }
 
-  async verifyOtp(rawPhone: string, code: string, referralCode?: string, deviceUuid?: string) {
+  async verifyOtp(rawPhone: string, code: string, referralCode?: string, deviceUuid?: string, anonSessionId?: string) {
     const phone = normalizePhone(rawPhone)
     const isTestPhone = phone === TEST_PHONE && this.isTestUserEnabled()
 
@@ -209,6 +211,14 @@ export class AuthService {
       await this.deviceTokens
         .attachToUser(deviceUuid, user.id)
         .catch((err) => this.logger.error(`attachToUser failed for deviceUuid=${deviceUuid} user=${user.id}`, err))
+    }
+
+    // چت anonymous قبل از لاگین (اگر بود) را به این اکانت منتقل می‌کند — شکست این کار
+    // هرگز نباید لاگین را fail کند (دقیقاً همان الگوی defensive بالا برای deviceUuid)
+    if (anonSessionId) {
+      await this.anonMigration
+        .migrateSessionToUser(anonSessionId, user.id)
+        .catch((err) => this.logger.error(`anon migration failed for anonSessionId=${anonSessionId} user=${user.id}`, err))
     }
 
     // حساب تستی هیچ‌وقت پشت گیت waitlist سافت‌لانچ گیر نمی‌افتد

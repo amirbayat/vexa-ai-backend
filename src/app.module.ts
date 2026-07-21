@@ -35,6 +35,7 @@ import { AdminNotificationsModule } from './modules/admin-notifications/admin-no
 import { DeviceTokensModule } from './modules/device-tokens/device-tokens.module'
 import { PushNotificationsModule } from './modules/push-notifications/push-notifications.module'
 import { QueueModule } from './queue/queue.module'
+import { AnonChatModule } from './modules/anon-chat/anon-chat.module'
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { QueueModule } from './queue/queue.module'
     AdminNotificationsModule,
     DeviceTokensModule,
     PushNotificationsModule,
+    AnonChatModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })

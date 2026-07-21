@@ -25,4 +25,10 @@ export class VerifyOtpDto {
   @IsOptional()
   @IsString({ message: fa.validation.required })
   deviceUuid?: string
+
+  // شناسه‌ی چت anonymous (localStorage فرانت، هدر X-Anon-Session-Id) — برای انتقال مکالمه‌ی
+  // چت بدون لاگین به این اکانت بعد از signup (AnonMigrationService)
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  anonSessionId?: string
 }

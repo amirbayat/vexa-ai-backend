@@ -1090,3 +1090,136 @@ enum PushCampaignSegment {
   BY_PLAN
   PHONE_LIST
 }
+
+// ─── Anonymous Chat (چت بدون لاگین برای بهبود conversion لندینگ) ────────────────
+// استک کاملاً موازی و مستقل از Conversation/Message/User — عمداً به کاربران پولی
+// گره نمی‌خورد تا صفر ریسک به مسیر production داشته باشد.
+
+// سینگلتون — دقیقاً الگوی ChatConfig/SalesBotConfig
+model AnonymousChatConfig {
+  id                         String   @id @default("singleton")
+  enabled                    Boolean  @default(true)
+  defaultModel               String   @default("openai/gpt-4o-mini")
+  freeMessageLimit           Int      @default(10) // n — سقف پیام رایگان یک‌بار برای همیشه (بر اساس IP)
+  dailyMessageLimitAfterFree Int      @default(5) // m — بعد از اتمام n، سقف روزانه
+  maxInputTokens             Int      @default(2000)
+  maxOutputTokens            Int      @default(1000)
+  // حالت ۱ (عادی): باکس همیشه‌نمایان بالای اینپوت، مثل GiftBanner
+  signupBannerMessage        String   @default("🎁 با ثبت‌نام رایگان، اعتبار و امکانات بیشتری بگیرید") @db.Text
+  // حالت ۲ (ورود به ناحیه‌ی محدود، بعد از اتمام n): هنوز اجازه‌ی چت دارد
+  limitedZoneMessage         String   @default("برای استفاده‌ی کامل و بدون محدودیت از نیوو، ثبت‌نام کنید") @db.Text
+  // حالت ۳ (مسدود، بعد از اتمام m امروز): اینپوت غیرفعال می‌شود
+  blockedMessage             String   @default("برای ادامه، لازم است ثبت‌نام کنید یا فردا دوباره امتحان کنید.") @db.Text
+  hintTitle                  String   @default("چطور می‌تونم امروز کمکتون کنم؟")
+  hintSubtitle               String   @default("هر سوالی داری بپرس — نوشتن، برنامه‌نویسی، ترجمه، تحلیل و خیلی چیزای دیگه")
+  updatedAt                  DateTime @updatedAt
+
+  @@map("anonymous_chat_config")
+}
+
+// کلید durable enforcement بر پایه‌ی IP — چون client می‌تواند localStorage را پاک کند
+// ولی IP همچنان همان می‌ماند (حداقل برای همان روز/جلسه)
+model AnonymousIdentity {
+  id                   String   @id @default(uuid())
+  ip                   String   @unique
+  lifetimeMessageCount Int      @default(0)
+  firstSeenAt          DateTime @default(now())
+  lastSeenAt           DateTime @default(now())
+
+  sessions AnonymousSession[]
+
+  @@map("anonymous_identities")
+}
+
+// نگاشت clientToken (هدر X-Anon-Session-Id) به یک AnonymousIdentity — مالکیت مکالمه
+// و migration-on-login روی همین session است، نه کل identity (جلوگیری از قاپیدن چت
+// یک غریبه روی IP مشترک هنگام لاگین)
+model AnonymousSession {
+  id               String    @id @default(uuid())
+  clientToken      String    @unique
+  identityId       String
+  createdAt        DateTime  @default(now())
+  lastSeenAt       DateTime  @default(now())
+  migratedToUserId String?
+  migratedAt       DateTime?
+
+  // UTM/referrer — فقط یک‌بار موقع اولین بازدید ثبت می‌شود؛ پایه‌ی فانل/آنالیز کمپین تبلیغاتی
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+  referrer    String?
+  landingPath String?
+
+  identity      AnonymousIdentity       @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  conversations AnonymousConversation[]
+  funnelEvents  AnonymousFunnelEvent[]
+
+  @@index([identityId])
+  @@index([migratedToUserId])
+  @@map("anonymous_sessions")
+}
+
+// موازی Conversation — بعد از migration، migratedConversationId به id مکالمه‌ی واقعی
+// اشاره می‌کند؛ ردیف anonymous حذف نمی‌شود (نگه‌داری برای آنالیز/QA ادمین)
+model AnonymousConversation {
+  id                     String   @id @default(uuid())
+  sessionId              String
+  model                  String
+  title                  String?
+  totalTokens            Int      @default(0)
+  lastMessageAt          DateTime @default(now())
+  createdAt              DateTime @default(now())
+  migratedConversationId String?
+
+  session  AnonymousSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  messages AnonymousMessage[]
+
+  @@index([sessionId, lastMessageAt(sort: Desc)])
+  @@map("anonymous_conversations")
+}
+
+// موازی Message
+model AnonymousMessage {
+  id             String      @id @default(uuid())
+  conversationId String
+  role           MessageRole
+  content        String      @db.Text
+  tokensInput    Int         @default(0)
+  tokensOutput   Int         @default(0)
+  model          String?
+  createdAt      DateTime    @default(now())
+
+  conversation AnonymousConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("anonymous_messages")
+}
+
+// لاگ رویداد فانل مارکتینگ — یک ردیف به‌ازای هر (session, eventType)، idempotent،
+// تا فانل بر اساس شمارش distinct session به هر مرحله محاسبه شود نه event count خام
+model AnonymousFunnelEvent {
+  id        String              @id @default(uuid())
+  sessionId String
+  eventType AnonFunnelEventType
+  createdAt DateTime            @default(now())
+  metadata  Json?
+
+  session AnonymousSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, eventType])
+  @@index([eventType, createdAt])
+  @@map("anonymous_funnel_events")
+}
+
+enum AnonFunnelEventType {
+  SESSION_CREATED
+  FIRST_MESSAGE_SENT
+  ENTERED_LIMITED_ZONE
+  HARD_BLOCKED
+  CLICKED_SIGNUP_CTA
+  SIGNUP_COMPLETED
+  FIRST_MESSAGE_AFTER_SIGNUP
+  FIRST_PURCHASE
+}
